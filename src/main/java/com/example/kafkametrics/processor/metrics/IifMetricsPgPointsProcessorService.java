@@ -4,7 +4,7 @@ import com.example.kafkametrics.kafka.RequiredFieldException;
 import com.example.kafkametrics.repository.CfmPgPoints;
 import com.example.kafkametrics.repository.ICfmPgPointsRepository;
 import com.example.kafkametrics.repository.IIifMetricsPgPointsRepository;
-import com.example.kafkametrics.repository.IProducerRepository;
+import com.example.kafkametrics.repository.IProducerService;
 import com.example.kafkametrics.repository.Producer;
 import com.example.kafkametrics.util.JsonNodes;
 
@@ -23,14 +23,14 @@ public class IifMetricsPgPointsProcessorService {
     private static final Logger log = LoggerFactory.getLogger(IifMetricsPgPointsProcessorService.class);
 
     private final IIifMetricsPgPointsRepository pgPointsRepository;
-    private final IProducerRepository producerRepository;
+    private final IProducerService producerService;
     private final ICfmPgPointsRepository cfmPgPointsRepository;
 
     public IifMetricsPgPointsProcessorService(IIifMetricsPgPointsRepository pgPointsRepository,
-                                               IProducerRepository producerRepository,
+                                               IProducerService producerService,
                                                ICfmPgPointsRepository cfmPgPointsRepository) {
         this.pgPointsRepository = pgPointsRepository;
-        this.producerRepository = producerRepository;
+        this.producerService = producerService;
         this.cfmPgPointsRepository = cfmPgPointsRepository;
     }
 
@@ -46,7 +46,7 @@ public class IifMetricsPgPointsProcessorService {
         String assetProductCd = JsonNodes.getText(node, "assetProductCd")
                 .orElseThrow(() -> new RequiredFieldException("assetProductCd"));
 
-        Producer producer = lookupProducer(agencyNbr);
+        Producer producer = producerService.findByAgencyNbr(agencyNbr);
 
         String cfmCd = producer.getCfmCd();
         String bonusPrimaryAgencyNbr = producer.getBonusPrimaryAgencyNbr();
@@ -60,14 +60,6 @@ public class IifMetricsPgPointsProcessorService {
         node.put("processedDt", Instant.now().toEpochMilli());
 
         pgPointsRepository.saveFromNode(agreementProductNbr, node);
-    }
-
-    @Cacheable("producer")
-    public Producer lookupProducer(String agencyNbr) {
-        return producerRepository.findByAgencyNbr(agencyNbr).orElseThrow(() -> {
-            log.warn("No Producer found for agencyNbr={}", agencyNbr);
-            return new RequiredFieldException("Producer not found for agencyNbr=" + agencyNbr);
-        });
     }
 
     @Cacheable("cfmPgPoints")
