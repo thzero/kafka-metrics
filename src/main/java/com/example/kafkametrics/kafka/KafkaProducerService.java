@@ -15,7 +15,7 @@ import java.util.concurrent.ExecutionException;
 /**
  * Unified Kafka publisher.
  * Used by both the siphon fast-path in {@link KafkaConsumerListener} and by
- * {@link com.example.kafkametrics.processor.IEventProcessor} implementations.
+ * {@link com.example.kafkametrics.services.processor.IEventProcessor} implementations.
  *
  * <p>Two overloads are provided:
  * <ul>

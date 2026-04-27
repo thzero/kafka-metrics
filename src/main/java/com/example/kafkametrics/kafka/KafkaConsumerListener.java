@@ -5,8 +5,7 @@ import com.example.kafkametrics.deadletter.IDeadLetterService;
 import com.example.kafkametrics.deadletter.ReasonCode;
 import com.example.kafkametrics.logging.MdcContext;
 import com.example.kafkametrics.model.KafkaMessage;
-import com.example.kafkametrics.processor.IEventProcessor;
-
+import com.example.kafkametrics.services.processor.IEventProcessor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;

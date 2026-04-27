@@ -6,8 +6,7 @@ import static org.mockito.Mockito.*;
 import com.example.kafkametrics.control.IControlService;
 import com.example.kafkametrics.deadletter.IDeadLetterService;
 import com.example.kafkametrics.deadletter.ReasonCode;
-import com.example.kafkametrics.processor.IEventProcessor;
-
+import com.example.kafkametrics.services.processor.IEventProcessor;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.clients.consumer.ConsumerRecord;

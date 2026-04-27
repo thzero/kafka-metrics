@@ -169,11 +169,33 @@ Throwing any exception routes the message to dead letter:
 
 | Class | Behaviour |
 |-------|-----------|
-| `IifMetricsEventProcessor` | Extracts `agreementProductNbr`, calls `IifMetricsRawProcessorService.enrich()` to persist IIF metrics across three SCD2 tables, then publishes the enriched payload to `kafka.topic.output` |
+| `IifMetricsEventProcessor` | Extracts `agreementProductNbr`, orchestrates calls to `IifMetricsRawProcessorService`, `IifMetricsIncludedProcessorService`, and `IifMetricsPgPointsProcessorService` to persist IIF metrics across three SCD2 tables, then publishes the enriched payload to `kafka.topic.output` |
 
-### Adding a new processor
+### Adding a new processor module
 
-Extend `AbstractEventProcessor<T>`, annotate with `@Component`, and implement `processInternal`. The base class handles serialization and publish automatically. Only one `IEventProcessor` bean may be registered — `KafkaConsumerListener` injects a single implementation.
+The skeleton exposes a three-layer extension hierarchy:
+
+```
+IEventProcessor                        ← interface (skeleton)
+  └── AbstractEventProcessor<T>        ← template-method base (skeleton)
+        └── MetricsEventProcessor<T>   ← metrics-specific base (metrics-core)
+              └── YourEventProcessor   ← your implementation (your module)
+```
+
+**Minimum contract — what your module must provide:**
+
+| Requirement | Detail |
+|-------------|--------|
+| Extend `AbstractEventProcessor<T>` | (or `MetricsEventProcessor<T>` if metrics-specific) |
+| Annotate with `@Service` | makes it a Spring bean; skeleton picks it up automatically |
+| Implement `processInternal(header, payload, messageId)` | return the output object; skeleton handles serialization + publish |
+| Depend on `:skeleton` (and `:metrics-core` if using `MetricsEventProcessor`) | no IIF or other metric-module dependency needed |
+
+**Wiring:** `KafkaConsumerListener` declares `IEventProcessor processor` in its constructor. Spring injects the single implementation found on the classpath — no skeleton changes required.
+
+**Multiple modules on the classpath:** annotate exactly one implementation with `@Primary`, or use `@Profile` to activate only one per environment.
+
+**Exceptions:** throw `ReasonCodeException` (or a subclass) to route to dead letter with a typed reason code. Any other unchecked exception routes with `PROCESSING_ERROR`.
 
 ---
 
@@ -319,8 +341,14 @@ spring:
 
 ## Project Structure
 
+The codebase is split into two logical modules. The **skeleton** contains zero metric-specific knowledge and is reusable for any Kafka processor. The **metric module** contains everything specific to a given metric type (IIF is the example here).
+
 ```
 src/main/java/com/example/kafkametrics/
+│
+│  ┌─────────────────────────────────────────────────────────────────┐
+│  │  SKELETON — reusable for any Kafka consumer application         │
+│  └─────────────────────────────────────────────────────────────────┘
 ├── KafkaMetricsApplication.java
 ├── api/
 │   ├── ConfigController.java            # GET /api/config — configuration view
@@ -362,45 +390,56 @@ src/main/java/com/example/kafkametrics/
 │   └── OutboundEnvelope.java            # record — outbound header + output payload
 ├── processor/
 │   ├── IEventProcessor.java             # interface — process(EventHeader, JsonNode)
-│   ├── AbstractEventProcessor.java      # template: processInternal → serialize → publish
-│   ├── MetricsEventProcessor.java       # abstract metrics base
-│   └── metrics/
-│       ├── MetricsEventProcessor.java   # concrete metrics processor base
-│       ├── IifMetricsEventProcessor.java         # @Component — main registered processor
-│       ├── IifMetricsRawProcessorService.java    # @Transactional — orchestrates all three IIF writes
-│       ├── IifMetricsIncludedProcessorService.java
-│       └── IifMetricsPgPointsProcessorService.java
+│   └── AbstractEventProcessor.java      # template: processInternal → serialize → publish
+├── util/
+│   └── JsonNodes.java                   # safe JsonNode field accessors
+│
+│  ┌─────────────────────────────────────────────────────────────────┐
+│  │  METRIC MODULE (example: IIF) — depends on skeleton, not vice versa │
+│  └─────────────────────────────────────────────────────────────────┘
 ├── repository/
-│   ├── EffectiveDateConstants.java      # HIGH_DATE sentinel
-│   ├── PolicyMaster.java                # entity — policy reference data
-│   ├── IPolicyMasterRepository.java
-│   ├── IPolicyMasterService.java        # interface — findByAgreementProductNumber
-│   ├── PolicyMasterServiceImpl.java     # @Cacheable("policyMaster"), throws on miss
-│   ├── PolicyAor.java                   # entity — agent of record
-│   ├── IPolicyAorRepository.java
-│   ├── IPolicyAorService.java           # interface — findByAgreementProductNumber
-│   ├── PolicyAorServiceImpl.java        # @Cacheable("policyAor"), throws on miss
-│   ├── Producer.java                    # entity — agencyNbr → bonusPrimaryAgencyNbr + cfmCd
-│   ├── IProducerRepository.java
-│   ├── IProducerService.java            # interface — findByAgencyNbr
-│   ├── ProducerServiceImpl.java         # @Cacheable("producer"), throws on miss
-│   ├── CfmPgPoints.java                 # entity — cfmCd + product combo → pgPointsValue
-│   ├── ICfmPgPointsRepository.java
-│   ├── IifDataSeeder.java               # seeds all reference tables on startup
-│   ├── IifMetricsRaw.java               # SCD2 entity
-│   ├── IIifMetricsRawRepository.java
-│   ├── IIifMetricsRawRepositoryCustom.java
-│   ├── IIifMetricsRawRepositoryCustomImpl.java   # SCD2 close + insert
-│   ├── IifMetricInclusion.java          # SCD2 entity
-│   ├── IIifMetricInclusionRepository.java
-│   ├── IIifMetricInclusionRepositoryCustom.java
-│   ├── IIifMetricInclusionRepositoryCustomImpl.java
-│   ├── IifMetricsPgPoints.java          # SCD2 entity
-│   ├── IIifMetricsPgPointsRepository.java
-│   ├── IIifMetricsPgPointsRepositoryCustom.java
-│   └── IIifMetricsPgPointsRepositoryCustomImpl.java
-└── util/
-    └── JsonNodes.java                   # safe JsonNode field accessors
+│   ├── lookup/                          # JPA entities + repositories for reference data
+│   │   ├── PolicyMaster.java                # entity — policy reference data
+│   │   ├── IPolicyMasterRepository.java
+│   │   ├── PolicyAor.java                   # entity — agent of record
+│   │   ├── IPolicyAorRepository.java
+│   │   ├── Producer.java                    # entity — agencyNbr → bonusPrimaryAgencyNbr + cfmCd
+│   │   ├── IProducerRepository.java
+│   │   ├── CfmPgPoints.java                 # entity — cfmCd + product combo → pgPointsValue
+│   │   ├── ICfmPgPointsRepository.java
+│   │   └── IifDataSeeder.java               # seeds all reference tables on startup
+│   └── metrics/                         # SCD2 IIF persistence
+│       ├── EffectiveDateConstants.java      # HIGH_DATE sentinel
+│       └── iif/
+│           ├── IifMetricsRaw.java               # SCD2 entity
+│           ├── IIifMetricsRawRepository.java
+│           ├── IIifMetricsRawRepositoryCustom.java
+│           ├── IIifMetricsRawRepositoryCustomImpl.java   # SCD2 close + insert
+│           ├── IifMetricInclusion.java          # SCD2 entity
+│           ├── IIifMetricInclusionRepository.java
+│           ├── IIifMetricInclusionRepositoryCustom.java
+│           ├── IIifMetricInclusionRepositoryCustomImpl.java
+│           ├── IifMetricsPgPoints.java          # SCD2 entity
+│           ├── IIifMetricsPgPointsRepository.java
+│           ├── IIifMetricsPgPointsRepositoryCustom.java
+│           └── IIifMetricsPgPointsRepositoryCustomImpl.java
+├── services/
+│   ├── metrics/
+│   │   └── lookup/                      # cached reference-data service layer
+│   │       ├── IPolicyMasterService.java        # interface — findByAgreementProductNumber
+│   │       ├── PolicyMasterServiceImpl.java     # @Cacheable("policyMaster"), throws on miss
+│   │       ├── IPolicyAorService.java           # interface — findByAgreementProductNumber
+│   │       ├── PolicyAorServiceImpl.java        # @Cacheable("policyAor"), throws on miss
+│   │       ├── IProducerService.java            # interface — findByAgencyNbr
+│   │       └── ProducerServiceImpl.java         # @Cacheable("producer"), throws on miss
+│   └── processor/
+│       └── metrics/
+│           ├── MetricsEventProcessor.java       # abstract base for metrics processors
+│           └── iif/
+│               ├── IifMetricsEventProcessor.java        # @Service @Transactional — orchestrator
+│               ├── IifMetricsRawProcessorService.java   # @Service — enriches + writes iif_metrics_raw
+│               ├── IifMetricsIncludedProcessorService.java
+│               └── IifMetricsPgPointsProcessorService.java
 
 src/test/java/com/example/kafkametrics/
 ├── api/
@@ -726,7 +765,7 @@ The close + insert pair is atomic. The transaction is opened by `IifMetricsEvent
 
 ```
 IifMetricsEventProcessor.process() — @Transactional (outer transaction begins)
-  └── IifMetricsRawProcessorService.enrich() — @Transactional(REQUIRED) joins
+  └── IifMetricsRawProcessorService.process() — @Transactional(REQUIRED) joins
         └── iifMetricsRawRepository.saveFromNode(...)
               UPDATE iif_metrics_raw SET eff_end_dt = now        (close previous)
               INSERT INTO iif_metrics_raw                         (insert new)
@@ -744,7 +783,7 @@ IifMetricsEventProcessor.process() — @Transactional (outer transaction begins)
 
 If any of the six statements fails, all six roll back — no partial SCD2 state is ever committed. The Kafka publish also occurs inside the outer transaction boundary: if publish fails, all six DB writes roll back too.
 
-The `CompletableFuture` lookups inside `enrich()` (`policyMasterService`, `policyAorService`) run on ForkJoinPool threads outside the transaction context — which is intentional, as they are read-only cache lookups that do not need transactional protection.
+The `CompletableFuture` lookups inside `IifMetricsRawProcessorService.process()` (`policyMasterService`, `policyAorService`) run on ForkJoinPool threads outside the transaction context — which is intentional, as they are read-only cache lookups that do not need transactional protection.
 
 ### Why the control table writes are separate transactions
 
@@ -759,7 +798,7 @@ The full sequence with transaction boundaries is:
 ```
 recordReceived()           — own @Transactional (commits; duplicate guard fires here)
   ↓
-enrich() / @Transactional  — IIF writes (raw + inclusion + pg points)
+IifMetricsEventProcessor.process() / @Transactional  — IIF writes (raw + inclusion + pg points)
   ↓
 Kafka publish              — outside any transaction
   ↓
