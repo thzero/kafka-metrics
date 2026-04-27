@@ -61,37 +61,64 @@ A Spring Boot application that consumes messages from a Kafka input topic, persi
 flowchart TD
     IT([Input Topic]) -->|consume| CL
 
-    subgraph CL["KafkaConsumerListener — consumer thread (no DB calls)"]
-        CL1["1. Deserialize JSON → KafkaMessage"]
-        CL2["2. Set MDC (interactionId, messageId)"]
-        CL3["3. inFlightIds.add(messageId)"]
-        CL4["4. Capture MDC snapshot"]
-        CL5["5. processingScheduler.execute()"]
-        CL1 --> CL2 --> CL3 --> CL4 --> CL5
+    subgraph CL["Consumer Thread"]
+        CL1["Deserialize → KafkaMessage"]
+        CL2["inFlightIds.add(messageId)"]
+        CL3["processingScheduler.execute()"]
+        CL1 --> CL2 --> CL3
     end
 
-    CL3 -->|"already present (in-flight duplicate)"| DL
-    CL5 -->|returns immediately| IT
+    CL2 -->|duplicate| DL
+    CL3 -->|returns immediately| IT
+    CL3 -->|dispatches| WT
 
     subgraph WT["Worker Thread — ScheduledExecutorService"]
-        WT0["0. Restore MDC from snapshot"]
-        WT1["1. ControlService.recordReceived()"]
-        WT2["2. IEventProcessor.process()"]
-        WT3["3. ControlService.recordPublished()"]
-        WT4["4. Acknowledgment.acknowledge()"]
+        WT1["ControlService.recordReceived()"]
+        WT2["IifMetricsEventProcessor.process()"]
+        WT3["ControlService.recordPublished()"]
+        WT4["Acknowledgment.acknowledge()"]
         WT5["finally: inFlightIds.remove()"]
-        WT0 --> WT1 --> WT2 --> WT3 --> WT4 --> WT5
+        WT1 --> WT2 --> WT3 --> WT4 --> WT5
     end
 
-    CL5 -->|immediate dispatch| WT
-    WT1 -->|INSERT ok| RR[(received_record\nDB)]
-    WT1 -->|"DataIntegrityViolationException\n(restart/replay duplicate)"| DL
-    WT3 -->|publish transactional| OT([Output Topic])
+    subgraph IIF["IifMetricsEventProcessor @Transactional"]
+        subgraph RAW["IifMetricsRawProcessorService"]
+            R1["fetch PolicyMaster\nfetch PolicyAor\n(parallel, Caffeine cached)"]
+            R2["enrich node with\noriginalPolicyEffectiveDate\nscenarioCd, assetProductEntCd\nagencyNbr, assigned"]
+            R3["SCD2 write → iif_metrics_raw"]
+            R1 --> R2 --> R3
+        end
+        subgraph INC["IifMetricsIncludedProcessorService"]
+            I1["SCD2 write → iif_metric_inclusion"]
+        end
+        subgraph PG["IifMetricsPgPointsProcessorService"]
+            P1["fetch Producer by agencyNbr\n(Caffeine cached)"]
+            P2["fetch CfmPgPoints by\ncfmCd + productFamily + assetProduct\n(Caffeine cached)"]
+            P3["enrich node with\nbonusPrimaryAgencyNbr\ncfmCode, pgPointsValue"]
+            P4["SCD2 write → iif_metric_pg_points"]
+            P1 --> P2 --> P3 --> P4
+        end
+        RAW --> INC --> PG
+    end
+
+    WT2 --> IIF
+    IIF -->|enriched node| WT3
+
+    R1 -->|agreementProductNbr| PM[(PolicyMaster DB)]
+    R1 -->|agreementProductNbr| AOR[(PolicyAor DB)]
+    P1 -->|agencyNbr| PROD[(Producer DB)]
+    P2 -->|cfmCd + product keys| CFM[(CfmPgPoints DB)]
+
+    WT1 -->|INSERT| RR[(received_record)]
+    WT3 -->|publish| OT([Output Topic])
+    WT3 -->|INSERT| PR[(published_record)]
+
     WT2 -->|ProcessingException| DL
     WT3 -->|KafkaPublishException| DL
+    WT1 -->|DataIntegrityViolationException| DL
 
     DL["DeadLetterService"]
-    DL --> DLR[(dead_letter_record\nDB)]
+    DL --> DLR[(dead_letter_record)]
 ```
 
 ### Concurrency Flow
@@ -123,24 +150,18 @@ sequenceDiagram
 
     Note over SE: A, B, C execute concurrently on worker threads
 
-    SE->>SE: Message A — restore MDC
     SE->>DB: Write RECEIVED (A)
-    SE->>SE: IEventProcessor.process(A)
-    SE->>OP: Publish A
+    SE->>SE: processor.process(A) → SCD2 writes + publish to output topic
     SE->>DB: Write PUBLISHED (A)
     SE-->>K: Acknowledge offset A
 
-    SE->>SE: Message B — restore MDC
     SE->>DB: Write RECEIVED (B)
-    SE->>SE: IEventProcessor.process(B)
-    SE->>OP: Publish B
+    SE->>SE: processor.process(B) → SCD2 writes + publish to output topic
     SE->>DB: Write PUBLISHED (B)
     SE-->>K: Acknowledge offset B
 
-    SE->>SE: Message C — restore MDC
     SE->>DB: Write RECEIVED (C)
-    SE->>SE: IEventProcessor.process(C)
-    SE->>OP: Publish C
+    SE->>SE: processor.process(C) → SCD2 writes + publish to output topic
     SE->>DB: Write PUBLISHED (C)
     SE-->>K: Acknowledge offset C
 ```

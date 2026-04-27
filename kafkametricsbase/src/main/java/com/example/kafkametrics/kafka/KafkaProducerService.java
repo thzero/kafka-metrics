@@ -13,13 +13,11 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 
 /**
- * Unified Kafka publisher.
- * Used by both the siphon fast-path in {@link KafkaConsumerListener} and by
- * {@link com.example.kafkametrics.services.processor.IEventProcessor} implementations.
+ * Unified Kafka publisher used by {@link com.example.kafkametrics.services.processor.IEventProcessor} implementations.
  *
  * <p>Two overloads are provided:
  * <ul>
- *   <li>{@link #publish(String, String, String)} — for pre-serialized strings (e.g. siphon pass-through)</li>
+ *   <li>{@link #publish(String, String, String)} — for pre-serialized strings</li>
  *   <li>{@link #publish(String, JsonNode, String)} — for dynamic JSON objects; serialized by Kafka's JsonSerializer</li>
  * </ul>
  */
@@ -40,7 +38,6 @@ public class KafkaProducerService {
 
     /**
      * Publishes a pre-serialized JSON string to the specified Kafka topic.
-     * Use this overload for pass-through payloads (e.g. the siphon fast-path).
      *
      * @param key     Kafka record key (typically the messageId) — used for partition routing
      * @param payload raw JSON string to publish as the record value
