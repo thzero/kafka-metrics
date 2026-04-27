@@ -1,33 +1,55 @@
-# Kafka Message Processor
+# Kafka Metrics Processor
 
-A Spring Boot application that consumes messages from a Kafka input topic, applies a deliberate processing delay to account for upstream race conditions, and publishes the result to an output topic — with exactly-once semantics, atomic duplicate detection, structured logging, and a REST API for operational visibility.
+A Spring Boot application that consumes messages from a Kafka input topic, persists IIF metrics to SCD2 tables, and publishes the enriched result to an output topic — with exactly-once semantics, atomic duplicate detection, Caffeine reference-data caching, and a REST API for operational visibility.
+
+---
+
+## Table of Contents
+
+- [What It Does](#what-it-does)
+- [Architecture](#architecture)
+  - [Component Overview](#component-overview)
+  - [Concurrency Flow](#concurrency-flow)
+- [Event Processing](#event-processing)
+- [Duplicate Detection](#duplicate-detection)
+- [Dead Letter Reason Codes](#dead-letter-reason-codes)
+- [REST API](#rest-api)
+  - [GET /api/control/inbound](#get-apicontrolinbound)
+  - [GET /api/control/outbound](#get-apicontroloutbound)
+  - [GET /api/deadletter](#get-apideadletter)
+  - [GET /api/config](#get-apiconfig)
+- [Configuration](#configuration)
+- [Project Structure](#project-structure)
+- [Running Locally](#running-locally)
+  - [1. Start the local stack](#1-start-the-local-stack)
+  - [2. Build and run all tests](#2-build-and-run-all-tests)
+  - [3. Run the application](#3-run-the-application)
+  - [4. Generate test messages](#4-generate-test-messages)
+  - [5. Send messages to Kafka](#5-send-messages-to-kafka)
+  - [6. Monitor pipeline timings](#6-monitor-pipeline-timings)
+  - [Full test loop](#full-test-loop)
+- [Bruno API Collection](#bruno-api-collection)
+- [IIF Metrics Persistence](#iif-metrics-persistence)
+  - [SCD Type 2 — Effective Date Tracking](#scd-type-2--effective-date-tracking)
+  - [Write Logic (saveFromNode)](#write-logic-savefromnode)
+  - [Transaction Boundary](#transaction-boundary)
+  - [Why the control table writes are separate transactions](#why-the-control-table-writes-are-separate-transactions)
+- [Reference Data Services](#reference-data-services)
+  - [Swapping the data source](#swapping-the-data-source)
+- [Documentation](#documentation)
 
 ---
 
 ## What It Does
 
 1. **Consumes** JSON messages from a Kafka input topic using `read_committed` isolation (EOS consumer).
-2. **Deserializes** each message into a typed `KafkaMessage` envelope (`event` header + `body` payload).
-3. **Siphons** Backdated Endorsements (`eventType: END` + `backdated: true`) directly to a dedicated siphon topic and acks immediately — bypassing the delay, duplicate gate, and processing pipeline entirely.
-4. **Deduplicates** atomically — uses an in-memory `ConcurrentHashMap` gate on the consumer thread; restart/replay duplicates are caught by a unique constraint on `ReceivedRecord.messageId` on the worker thread.
-5. **Schedules** the remaining work on a `ScheduledExecutorService` with a configurable delay (default 20 seconds). The consumer thread returns immediately and is free to pull the next message — no blocking.
-6. **Processes** the message via `MessageProcessorService` (business logic stub; swap in your own implementation).
-7. **Publishes** the result to a Kafka output topic via a transactional producer.
-8. **Acknowledges** the input offset only after the full pipeline succeeds.
-9. Routes any failure to the **dead letter** store with a typed `reasonCode`.
-
----
-
-## Event Types
-
-| Code | Name | Notes |
-|------|------|-------|
-| `NC`  | New Business | Standard new policy intake |
-| `END` | Endorsement | Policy modification. When `event.backdated: true`, this is a **Backdated Endorsement (BDE)** — siphoned directly to `kafka.topic.siphon-bde` on the consumer thread, bypassing the delay, duplicate gate, and processing pipeline. |
-| `TRM` | Termination | Policy cancellation/termination |
-| `RNW` | Renewal | Policy renewal |
-
-Backdated Endorsements are identified at the field level (`eventType: END` + `backdated: true`) rather than by a distinct event type code. This keeps the routing table simple — `END` always means endorsement; the `backdated` flag drives the siphon fast-path.
+2. **Deserializes** each message into a typed `KafkaMessage` envelope (`header` + `payload`).
+3. **Deduplicates** atomically — uses an in-memory `ConcurrentHashMap` gate on the consumer thread; restart/replay duplicates are caught by a unique constraint on `ReceivedRecord.messageId` on the worker thread.
+4. **Submits** the work immediately to a `ScheduledExecutorService` worker thread. The consumer thread returns and is free to pull the next message — no blocking.
+5. **Processes** the message via the registered `IEventProcessor` implementation.
+6. **Publishes** the enriched result to a Kafka output topic via a transactional producer.
+7. **Acknowledges** the input offset only after the full pipeline succeeds.
+8. Routes any failure to the **dead letter** store with a typed `reasonCode`.
 
 ---
 
@@ -42,36 +64,31 @@ flowchart TD
     subgraph CL["KafkaConsumerListener — consumer thread (no DB calls)"]
         CL1["1. Deserialize JSON → KafkaMessage"]
         CL2["2. Set MDC (interactionId, messageId)"]
-    CL3["3. END+backdated? → siphon + ack"]
-        CL4["4. inFlightIds.add(messageId)"]
-        CL5["5. Capture MDC snapshot"]
-        CL6["6. processingScheduler.schedule(delay=20s)"]
-        CL1 --> CL2 --> CL3 --> CL4 --> CL5 --> CL6
+        CL3["3. inFlightIds.add(messageId)"]
+        CL4["4. Capture MDC snapshot"]
+        CL5["5. processingScheduler.execute()"]
+        CL1 --> CL2 --> CL3 --> CL4 --> CL5
     end
 
-    CL3 -->|"END + backdated=true"| ST([Siphon Topic])
-    CL3 -->|siphon failure| CL3
-    CL4 -->|"already present (in-flight duplicate)"| DL
-    CL6 -->|returns immediately| IT
+    CL3 -->|"already present (in-flight duplicate)"| DL
+    CL5 -->|returns immediately| IT
 
     subgraph WT["Worker Thread — ScheduledExecutorService"]
         WT0["0. Restore MDC from snapshot"]
         WT1["1. ControlService.recordReceived()"]
-        WT2["2. MessageProcessorService.process() → EventProcessor.process()"]
+        WT2["2. IEventProcessor.process()"]
         WT3["3. ControlService.recordPublished()"]
         WT4["4. Acknowledgment.acknowledge()"]
         WT5["finally: inFlightIds.remove()"]
         WT0 --> WT1 --> WT2 --> WT3 --> WT4 --> WT5
     end
 
-    CL6 -->|after delay| WT
+    CL5 -->|immediate dispatch| WT
     WT1 -->|INSERT ok| RR[(received_record\nDB)]
     WT1 -->|"DataIntegrityViolationException\n(restart/replay duplicate)"| DL
     WT3 -->|publish transactional| OT([Output Topic])
-    WT4 --> PR[(published_record\nDB)]
     WT2 -->|ProcessingException| DL
     WT3 -->|KafkaPublishException| DL
-    WT4 -->|Exception| DL
 
     DL["DeadLetterService"]
     DL --> DLR[(dead_letter_record\nDB)]
@@ -89,113 +106,48 @@ sequenceDiagram
 
     Note over K,CT: Messages arrive continuously
 
-    K->>CT: Message A (T=0)
-    CT->>CT: Deserialize + in-memory duplicate check (ConcurrentHashMap)
-    CT->>SE: schedule(processA, delay=20s)
+    K->>CT: Message A
+    CT->>CT: Deserialize + in-memory duplicate check
+    CT->>SE: execute(processA)
     CT-->>K: returns immediately
 
-    K->>CT: Message B (T=1s)
-    CT->>CT: Deserialize + in-memory duplicate check (ConcurrentHashMap)
-    CT->>SE: schedule(processB, delay=20s)
+    K->>CT: Message B
+    CT->>CT: Deserialize + in-memory duplicate check
+    CT->>SE: execute(processB)
     CT-->>K: returns immediately
 
-    K->>CT: Message C (T=2s)
-    CT->>CT: Deserialize + in-memory duplicate check (ConcurrentHashMap)
-    CT->>SE: schedule(processC, delay=20s)
+    K->>CT: Message C
+    CT->>CT: Deserialize + in-memory duplicate check
+    CT->>SE: execute(processC)
     CT-->>K: returns immediately
 
-    Note over SE: A, B, C all waiting simultaneously on separate worker threads
+    Note over SE: A, B, C execute concurrently on worker threads
 
-    SE->>SE: Message A fires (T=20s) — restore MDC
+    SE->>SE: Message A — restore MDC
     SE->>DB: Write RECEIVED (A)
-    SE->>SE: Business logic
+    SE->>SE: IEventProcessor.process(A)
     SE->>OP: Publish A
     SE->>DB: Write PUBLISHED (A)
     SE-->>K: Acknowledge offset A
 
-    SE->>SE: Message B fires (T=21s) — restore MDC
+    SE->>SE: Message B — restore MDC
     SE->>DB: Write RECEIVED (B)
-    SE->>SE: Business logic
+    SE->>SE: IEventProcessor.process(B)
     SE->>OP: Publish B
     SE->>DB: Write PUBLISHED (B)
     SE-->>K: Acknowledge offset B
 
-    SE->>SE: Message C fires (T=22s) — restore MDC
+    SE->>SE: Message C — restore MDC
     SE->>DB: Write RECEIVED (C)
-    SE->>SE: Business logic
+    SE->>SE: IEventProcessor.process(C)
     SE->>OP: Publish C
     SE->>DB: Write PUBLISHED (C)
     SE-->>K: Acknowledge offset C
 ```
 
 **Key points:**
-- The **consumer thread makes zero DB calls** — fast operations only (deserialize, BDE siphon check, nanosecond in-memory duplicate check, schedule), then returns immediately
-
----
-
-## Siphon Routing
-
-The siphon system fast-paths selected messages directly to dedicated Kafka topics on the consumer thread, bypassing the 20-second delay, duplicate gate, and processing pipeline entirely.
-
-### How it works
-
-`KafkaConsumerListener` iterates a `List<SiphonEvaluator>` (first match wins). For each evaluator, `evaluate(message)` returns:
-- `Optional.of(topicName)` — siphon to that topic and ack immediately, stopping evaluation
-- `Optional.empty()` — continue to the next evaluator; if none match, the message follows the normal pipeline
-
-Active evaluators are controlled by `app.siphon.enabled` (list of event codes). An empty list activates all registered evaluators.
-
-### Naming convention
-
-| Thing | Pattern | Example |
-|-------|---------|--------|
-| Evaluator class | `{EventCode}SiphonEvaluator` | `BdeSiphonEvaluator` |
-| YAML property | `kafka.topic.siphon-{event-code}` | `kafka.topic.siphon-bde` |
-| `@Value` annotation | `${kafka.topic.siphon-{event-code}}` | `${kafka.topic.siphon-bde}` |
-
-### Implemented evaluators
-
-| Class | Event code | Matches | Topic property |
-|-------|-----------|---------|----------------|
-| `BdeSiphonEvaluator` | `bde` | `eventType=END` + `backdated=true` | `kafka.topic.siphon-bde` |
-
-Control which are active via `app.siphon.enabled` (empty = all active).
-
-### Adding a new siphon route
-
-1. Implement `SiphonEvaluator`, inject your topic via `@Value`, annotate with `@Component`:
-   ```java
-   @Component
-   public class TrmSiphonEvaluator implements SiphonEvaluator {
-       private final String topic;
-       public TrmSiphonEvaluator(@Value("${kafka.topic.siphon-trm}") String topic) {
-           this.topic = topic;
-       }
-       @Override
-       public String eventCode() { return "trm"; }
-       @Override
-       public Optional<String> evaluate(KafkaMessage message) {
-           if (message.event() == null) return Optional.empty();
-           return EventType.TRM.equals(message.event().eventType())
-               ? Optional.of(topic) : Optional.empty();
-       }
-   }
-   ```
-
-2. Add the topic key to `application.yml`:
-   ```yaml
-   kafka:
-     topic:
-       siphon-trm: trm-siphon-topic
-   ```
-
-3. Add the event code to `app.siphon.enabled`:
-   ```yaml
-   app:
-     siphon:
-       enabled: [bde, trm]
-   ```
-- **All messages are in-flight simultaneously**, each executing business logic independently on their own virtual worker thread
+- The **consumer thread makes zero DB calls** — fast operations only (deserialize, nanosecond in-memory duplicate check, submit), then returns immediately
+- **All messages are in-flight simultaneously**, each executing on their own worker thread
 - **Acknowledgment happens on the worker thread** after the full pipeline completes — Kafka does not advance the offset until then
 - If the app restarts mid-flight, un-acked messages are redelivered; the unique constraint on `ReceivedRecord.message_id` catches restart/replay duplicates on the worker thread
 
@@ -203,53 +155,25 @@ Control which are active via `app.siphon.enabled` (empty = all active).
 
 ## Event Processing
 
-After the siphon check, the normal pipeline delegates business logic to an `EventProcessor` implementation selected by `eventType`. This lets each event code have its own processing strategy without changing the listener or pipeline.
+After the duplicate check, the pipeline delegates to the registered `IEventProcessor` implementation. The processor receives the `EventHeader` and `JsonNode` payload and is responsible for all business logic and the Kafka publish step.
+
+Throwing any exception routes the message to dead letter:
+- `ReasonCodeException` (and subclasses) — uses the typed `reasonCode` from the exception
+- Any other exception — `PROCESSING_ERROR`
 
 ### How it works
 
-`MessageProcessorService` is injected with all `@Component` beans that implement `EventProcessor`. At startup it builds a `Map<eventCode, EventProcessor>`. For each message, `process(message, rawPayload)` looks up the processor by `message.event().eventType()` and falls back to the `"*"` default processor when no specific handler is registered.
-
-The processor owns the publish step — it calls `KafkaProducerService.publish(key, payload, topic)` directly. Throwing any exception routes the message to dead letter:
-- `KafkaPublishException` → `PUBLISH_ERROR`
-- Any other exception → `PROCESSING_ERROR`
+`AbstractEventProcessor<T>` is a generic template-method base. `processInternal(header, payload, messageId)` returns the output object; the base class serializes it to JSON and publishes to `kafka.topic.output`. Subclasses only implement `processInternal`.
 
 ### Implemented processors
 
-| Class | Event code | Behaviour |
-|-------|-----------|----------|
-| `DefaultEventProcessor` | `*` (fallback) | Serializes the `KafkaMessage` to JSON and publishes to `kafka.topic.output` |
+| Class | Behaviour |
+|-------|-----------|
+| `IifMetricsEventProcessor` | Extracts `agreementProductNbr`, calls `IifMetricsRawProcessorService.enrich()` to persist IIF metrics across three SCD2 tables, then publishes the enriched payload to `kafka.topic.output` |
 
 ### Adding a new processor
 
-1. Implement `EventProcessor`, annotate with `@Component`:
-   ```java
-   @Component
-   public class RenewalEventProcessor implements EventProcessor {
-       private final KafkaProducerService publisher;
-       private final String outputTopic;
-
-       public RenewalEventProcessor(
-               KafkaProducerService publisher,
-               @Value("${kafka.topic.output}") String outputTopic) {
-           this.publisher = publisher;
-           this.outputTopic = outputTopic;
-       }
-
-       @Override
-       public String eventCode() { return "RNW"; }
-
-       @Override
-       public void process(KafkaMessage message, String rawPayload) {
-           // custom renewal logic here
-           String key = message.body() != null ? message.body().messageId() : null;
-           publisher.publish(key, rawPayload, outputTopic);
-       }
-   }
-   ```
-
-2. That's it — `MessageProcessorService` picks up the new bean automatically via Spring's `List<EventProcessor>` injection. No other changes required.
-
-> **Note:** `eventCode()` must match the `eventType` string in the incoming message exactly (e.g. `"RNW"`). The `"*"` code is reserved for the default fallback — do not use it in a concrete processor.
+Extend `AbstractEventProcessor<T>`, annotate with `@Component`, and implement `processInternal`. The base class handles serialization and publish automatically. Only one `IEventProcessor` bean may be registered — `KafkaConsumerListener` injects a single implementation.
 
 ---
 
@@ -276,13 +200,15 @@ Duplicate detection uses two layers so the consumer thread never touches the dat
 
 | Code | Trigger |
 |------|---------|
+| `INVALID_MESSAGE_ID` | `header.messageId` is missing or is not a valid UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) |
+| `MISSING_PAYLOAD` | Message has no payload body |
 | `DESERIALIZATION_ERROR` | Message payload is not valid JSON or does not match the expected schema |
-| `INVALID_MESSAGE_ID` | `body.messageId` is missing or is not a valid UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`) |
-| `DUPLICATE` | `messageId` already in the in-flight set (same-instance duplicate during delay window), or `DataIntegrityViolationException` from the DB unique constraint (restart/replay duplicate) |
+| `LISTENING_ERROR` | Unexpected error on the consumer thread before dispatch |
+| `DUPLICATE` | `messageId` already in the in-flight set (same-instance duplicate), or `DataIntegrityViolationException` from the DB unique constraint (restart/replay duplicate) |
 | `CONTROL_RECORD_ERROR` | Unexpected failure writing the `ReceivedRecord` (not a constraint violation) |
-| `PROCESSING_ERROR` | `MessageProcessorService.process()` threw an exception, or processor timed out (`processor-timeout-ms`) |
+| `PROCESSING_ERROR` | `IEventProcessor.process()` threw an unchecked exception, or processor timed out (`processor-timeout-ms`) |
 | `PUBLISH_ERROR` | `KafkaProducerService.publish()` threw an exception |
-| `TIMEOUT` | Processor exceeded `processor-timeout-ms` — message cancelled and routed to dead letter |
+| `DATABASE_ERROR` | An unexpected database error occurred during IIF metrics persistence |
 
 ---
 
@@ -325,7 +251,7 @@ Response fields: `messageId`, `interactionId`, `reasonCode`, `rawPayload`, `fail
 ### `GET /api/config`
 Returns the current running configuration as JSON.
 
-Response shape: `kafka` (bootstrapServers, consumerGroupId, consumerConcurrency, inputTopic, outputTopic) and `app` (processorDelayMs, processorLoadDelayMs, processorTimeoutMs, workerThreads, siphonEnabledEvaluators)
+Response shape: `kafka` (bootstrapServers, consumerGroupId, consumerConcurrency, inputTopic, outputTopic) and `app` (processorTimeoutMs, workerThreads)
 
 ---
 
@@ -336,13 +262,18 @@ All settings are in `src/main/resources/application.yml`.
 ```yaml
 app:
   processing:
-    processor-delay-ms: 20000     # ScheduledExecutorService.schedule() delay before business logic; 0 = disabled
-    processor-load-delay-ms: 3500 # surrogate load delay simulating upstream API calls; 0 = disabled
     processor-timeout-ms: 10000   # hard timeout for processor step; 0 = disabled
+    lookup-timeout-ms: 2000       # timeout for reference-data cache lookups
     status-log-interval-ms: 10000 # how often to log in-flight count; 0 = disabled
     worker-threads: 200           # scheduler core pool size (platform threads for dispatch only)
-  siphon:
-    enabled: [bde]                # event codes of active SiphonEvaluators (empty = all active)
+  seed-data:
+    enabled: true                 # seed reference data on startup (H2 dev/test only)
+
+spring:
+  cache:
+    cache-names: policyMaster,policyAor,producer,cfmPgPoints
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=15m
 
 kafka:
   bootstrap-servers: localhost:9092
@@ -354,8 +285,6 @@ kafka:
   topic:
     input: input-topic
     output: output-topic
-    siphon-bde: siphon-bde-topic    # BdeSiphonEvaluator — Backdated Endorsements (END + backdated=true)
-    # siphon-trm: trm-topic         # example: add TrmSiphonEvaluator for TRM events
 
 server:
   port: 8080
@@ -363,7 +292,9 @@ server:
 
 **`worker-threads`:** controls how many platform threads the scheduler keeps alive to dispatch tasks. Actual task execution uses virtual threads (Java 21), so this has no effect on throughput or concurrency. A value of 4–8 is sufficient for most workloads.
 
-**`processor-load-delay-ms`:** a secondary sleep on the worker thread simulating time spent calling upstream APIs. Added on top of `processor-delay-ms`. Set to `0` to disable.
+**`lookup-timeout-ms`:** timeout applied to each Caffeine reference-data lookup (policy, producer, CFM pg points). A miss throws `RequiredFieldException` and routes the message to dead letter.
+
+**`seed-data.enabled`:** when `true`, `IifDataSeeder` seeds all reference tables on startup (PolicyMaster, PolicyAor, Producer, CfmPgPoints). Safe for H2 dev/test only.
 
 **Sizing `concurrency`:** set to `total partitions ÷ deployed instances`. With 10 partitions across 10 instances, `concurrency: 1` gives each instance exactly one partition. Setting it higher creates idle threads.
 
@@ -390,7 +321,7 @@ spring:
 
 ```
 src/main/java/com/example/kafkametrics/
-├── kafkametricsApplication.java       # entry point
+├── KafkaMetricsApplication.java
 ├── api/
 │   ├── ConfigController.java            # GET /api/config — configuration view
 │   ├── QueryController.java             # REST query endpoints
@@ -398,50 +329,92 @@ src/main/java/com/example/kafkametrics/
 ├── config/
 │   └── AppProperties.java               # @ConfigurationProperties for app.*
 ├── control/
-│   ├── ControlService.java              # interface
+│   ├── IControlService.java             # interface
 │   ├── ControlServiceImpl.java          # JPA implementation
+│   ├── ControlStatus.java
 │   ├── ReceivedRecord.java              # entity — unique constraint on messageId
-│   ├── ReceivedRecordRepository.java
-│   ├── PublishedRecord.java             # entity — no unique constraint
-│   └── PublishedRecordRepository.java
+│   ├── IReceivedRecordRepository.java
+│   ├── PublishedRecord.java             # entity
+│   └── IPublishedRecordRepository.java
 ├── deadletter/
-│   ├── DeadLetterService.java           # interface
+│   ├── IDeadLetterService.java          # interface
 │   ├── DeadLetterServiceImpl.java       # JPA implementation
 │   ├── DeadLetterRecord.java            # entity
-│   ├── DeadLetterRepository.java
+│   ├── IDeadLetterRepository.java
 │   └── ReasonCode.java                  # enum
+├── health/
 ├── kafka/
-│   ├── KafkaConsumerConfig.java         # consumer + scheduler + active evaluator beans
+│   ├── KafkaConsumerConfig.java         # consumer + scheduler beans
 │   ├── KafkaConsumerListener.java       # @KafkaListener — main pipeline
 │   ├── KafkaProducerConfig.java         # transactional producer bean
-│   ├── KafkaProducerService.java        # publish(key, payload, topic) — used by siphon and processors
+│   ├── KafkaProducerService.java        # publish(key, payload, topic)
 │   ├── KafkaPublishException.java
-│   ├── MessageProcessorService.java     # routes by eventType to registered EventProcessor beans
+│   ├── KafkaTopicConfig.java
+│   ├── DatabaseException.java
 │   ├── ProcessingException.java
-│   ├── processor/
-│   │   ├── EventProcessor.java          # interface — eventCode() + process(KafkaMessage, rawPayload)
-│   │   └── DefaultEventProcessor.java  # fallback for unrecognised event types (eventCode = "*")
-│   └── siphon/
-│       ├── SiphonEvaluator.java         # interface — eventCode() + evaluate()
-│       └── BdeSiphonEvaluator.java      # routes END+backdated=true to siphon-bde topic
+│   ├── ReasonCodeException.java
+│   └── RequiredFieldException.java      # dead-letters on cache miss
 ├── logging/
 │   └── MdcContext.java                  # MDC set/clear helpers
-└── model/
-    ├── EventHeader.java                 # record — interactionId, eventType
-    ├── KafkaMessage.java                # record — event + body envelope
-    └── MessageBody.java                 # record — messageId
+├── model/
+│   ├── EventHeader.java                 # record — interactionId, messageId, etc.
+│   ├── KafkaMessage.java                # record — header + payload envelope
+│   └── OutboundEnvelope.java            # record — outbound header + output payload
+├── processor/
+│   ├── IEventProcessor.java             # interface — process(EventHeader, JsonNode)
+│   ├── AbstractEventProcessor.java      # template: processInternal → serialize → publish
+│   ├── MetricsEventProcessor.java       # abstract metrics base
+│   └── metrics/
+│       ├── MetricsEventProcessor.java   # concrete metrics processor base
+│       ├── IifMetricsEventProcessor.java         # @Component — main registered processor
+│       ├── IifMetricsRawProcessorService.java    # @Transactional — orchestrates all three IIF writes
+│       ├── IifMetricsIncludedProcessorService.java
+│       └── IifMetricsPgPointsProcessorService.java
+├── repository/
+│   ├── EffectiveDateConstants.java      # HIGH_DATE sentinel
+│   ├── PolicyMaster.java                # entity — policy reference data
+│   ├── IPolicyMasterRepository.java
+│   ├── IPolicyMasterService.java        # interface — findByAgreementProductNumber
+│   ├── PolicyMasterServiceImpl.java     # @Cacheable("policyMaster"), throws on miss
+│   ├── PolicyAor.java                   # entity — agent of record
+│   ├── IPolicyAorRepository.java
+│   ├── IPolicyAorService.java           # interface — findByAgreementProductNumber
+│   ├── PolicyAorServiceImpl.java        # @Cacheable("policyAor"), throws on miss
+│   ├── Producer.java                    # entity — agencyNbr → bonusPrimaryAgencyNbr + cfmCd
+│   ├── IProducerRepository.java
+│   ├── IProducerService.java            # interface — findByAgencyNbr
+│   ├── ProducerServiceImpl.java         # @Cacheable("producer"), throws on miss
+│   ├── CfmPgPoints.java                 # entity — cfmCd + product combo → pgPointsValue
+│   ├── ICfmPgPointsRepository.java
+│   ├── IifDataSeeder.java               # seeds all reference tables on startup
+│   ├── IifMetricsRaw.java               # SCD2 entity
+│   ├── IIifMetricsRawRepository.java
+│   ├── IIifMetricsRawRepositoryCustom.java
+│   ├── IIifMetricsRawRepositoryCustomImpl.java   # SCD2 close + insert
+│   ├── IifMetricInclusion.java          # SCD2 entity
+│   ├── IIifMetricInclusionRepository.java
+│   ├── IIifMetricInclusionRepositoryCustom.java
+│   ├── IIifMetricInclusionRepositoryCustomImpl.java
+│   ├── IifMetricsPgPoints.java          # SCD2 entity
+│   ├── IIifMetricsPgPointsRepository.java
+│   ├── IIifMetricsPgPointsRepositoryCustom.java
+│   └── IIifMetricsPgPointsRepositoryCustomImpl.java
+└── util/
+    └── JsonNodes.java                   # safe JsonNode field accessors
 
 src/test/java/com/example/kafkametrics/
 ├── api/
-│   ├── ConfigControllerTest.java        # MVC slice test
-│   └── QueryControllerTest.java         # MVC slice test
-├── control/ControlServiceImplTest.java  # JPA slice test
-├── deadletter/DeadLetterServiceImplTest.java
-├── integration/KafkaIntegrationTest.java # @EmbeddedKafka full test
-└── kafka/
-    ├── KafkaConsumerListenerTest.java    # unit test
-    └── siphon/
-        └── BdeSiphonEvaluatorTest.java   # unit test
+│   ├── ConfigControllerTest.java
+│   └── QueryControllerTest.java
+├── control/
+│   └── ControlServiceImplTest.java
+├── deadletter/
+│   └── DeadLetterServiceImplTest.java
+├── integration/
+│   └── KafkaIntegrationTest.java        # @EmbeddedKafka full pipeline test
+├── kafka/
+│   └── KafkaConsumerListenerTest.java
+└── processor/
 ```
 
 ---
@@ -553,7 +526,6 @@ Use this to clear messages from a topic between test runs without restarting the
 ```powershell
 docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic input-topic
 docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic output-topic
-docker exec kafka /opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --delete --topic siphon-bde-topic
 ```
 
 **Reset consumer group offset to beginning** (re-read all existing messages without deleting them — app must be stopped first):
@@ -674,7 +646,7 @@ While messages are processing, check the UIs:
 
 | URL | What to look for |
 |-----|-----------------|
-| http://localhost:8081 | Kafka UI — consumer group lag draining on `input-topic`; messages appearing on `output-topic` and `siphon-bde-topic` |
+| http://localhost:8081 | Kafka UI — consumer group lag draining on `input-topic`; messages appearing on `output-topic` |
 | http://localhost:8080/actuator/health | App health — `processorThreadPool` utilization |
 | http://localhost:3000 | Grafana — E2E and pipeline latency histograms (Explore tab) |
 
@@ -706,7 +678,6 @@ A [Bruno](https://www.usebruno.com/) collection is included in the `bruno/` fold
 | actuator | Metrics - Pipeline Latency | `GET /actuator/metrics/kafka.processor.pipeline.latency` |
 | actuator | Metrics - Messages Received | `GET /actuator/metrics/kafka.processor.messages.received` |
 | actuator | Metrics - Messages Published | `GET /actuator/metrics/kafka.processor.messages.published` |
-| actuator | Metrics - Messages Siphoned | `GET /actuator/metrics/kafka.processor.messages.siphoned` |
 | actuator | Metrics - Messages Failed | `GET /actuator/metrics/kafka.processor.messages.failed` |
 | actuator | Prometheus Scrape | `GET /actuator/prometheus` |
 | actuator | Info | `GET /actuator/info` |
@@ -771,7 +742,7 @@ enrich() — @Transactional (outer transaction begins)
 
 If any of the six statements fails, all six roll back — no partial SCD2 state is ever committed.
 
-The `CompletableFuture` lookups (`lookupPolicy`, `lookupAor`) run on worker threads **before** the transaction opens, so they are not included in the transaction boundary.
+The `CompletableFuture` lookups (`policyMasterService.findByAgreementProductNumber`, `policyAorService.findByAgreementProductNumber`) run on worker threads **before** the transaction opens, so they are not included in the transaction boundary.
 
 ### Why the control table writes are separate transactions
 
@@ -794,6 +765,39 @@ recordPublished()          — own @Transactional (only reached on successful pu
   ↓
 acknowledgment.acknowledge()
 ```
+
+---
+
+## Reference Data Services
+
+Policy, AOR, and producer reference data is accessed through service interfaces rather than repositories directly:
+
+| Interface | Impl | Cache |
+|-----------|------|-------|
+| `IPolicyMasterService` | `PolicyMasterServiceImpl` | `policyMaster` |
+| `IPolicyAorService` | `PolicyAorServiceImpl` | `policyAor` |
+| `IProducerService` | `ProducerServiceImpl` | `producer` |
+
+Each implementation is `@Cacheable` via Caffeine (TTL 15 min, max 10 000 entries). A cache miss that returns no results throws `RequiredFieldException`, which routes the message to dead letter.
+
+### Swapping the data source
+
+The processor services (`IifMetricsRawProcessorService`, `IifMetricsPgPointsProcessorService`) depend only on the interfaces. To replace the database-backed implementations with API calls — or any other source — create a new implementation and qualify it:
+
+```java
+@Service
+@Primary  // or @Profile("api")
+public class PolicyMasterApiServiceImpl implements IPolicyMasterService {
+
+    @Override
+    @Cacheable("policyMaster")
+    public PolicyMaster findByAgreementProductNumber(String agreementProductNumber) {
+        // call upstream API here
+    }
+}
+```
+
+No changes to the processor services are required.
 
 ---
 
