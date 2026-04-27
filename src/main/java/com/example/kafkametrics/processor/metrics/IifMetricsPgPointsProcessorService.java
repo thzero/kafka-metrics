@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 
@@ -34,6 +35,7 @@ public class IifMetricsPgPointsProcessorService {
         this.cfmPgPointsRepository = cfmPgPointsRepository;
     }
 
+    @Transactional
     public void process(String messageId, String agreementProductNbr, ObjectNode node) {
         log.info("Processing IIF metrics PG points messageId={} agreementProductNbr={}", messageId, agreementProductNbr);
 

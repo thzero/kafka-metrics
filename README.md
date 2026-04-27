@@ -722,27 +722,29 @@ If no previous active row exists, the UPDATE is a no-op and the INSERT proceeds 
 
 ### Transaction Boundary
 
-The close + insert pair is atomic. The transaction is opened at the service layer (`IifMetricsRawProcessorService.enrich()`, annotated `@Transactional`) and spans all three table writes:
+The close + insert pair is atomic. The transaction is opened by `IifMetricsEventProcessor` (annotated `@Transactional`) when `KafkaConsumerListener` calls `processor.process()`. All three processor services join this transaction via `REQUIRED` propagation:
 
 ```
-enrich() — @Transactional (outer transaction begins)
-  └── iifMetricsRawRepository.saveFromNode(...)            — @Transactional(REQUIRED) joins
-        UPDATE iif_metrics_raw SET eff_end_dt = now        (close previous)
-        INSERT INTO iif_metrics_raw                         (insert new)
-  └── iifMetricsIncludedProcessorService.process(...)
-        └── inclusionRepository.saveFromNode(...)           — @Transactional(REQUIRED) joins
+IifMetricsEventProcessor.process() — @Transactional (outer transaction begins)
+  └── IifMetricsRawProcessorService.enrich() — @Transactional(REQUIRED) joins
+        └── iifMetricsRawRepository.saveFromNode(...)
+              UPDATE iif_metrics_raw SET eff_end_dt = now        (close previous)
+              INSERT INTO iif_metrics_raw                         (insert new)
+  └── IifMetricsIncludedProcessorService.process() — @Transactional(REQUIRED) joins
+        └── inclusionRepository.saveFromNode(...)
               UPDATE iif_metric_inclusion SET eff_end_dt = now  (close previous)
               INSERT INTO iif_metric_inclusion                   (insert new)
-  └── iifMetricsPgPointsProcessorService.process(...)
-        └── pgPointsRepository.saveFromNode(...)            — @Transactional(REQUIRED) joins
+  └── IifMetricsPgPointsProcessorService.process() — @Transactional(REQUIRED) joins
+        └── pgPointsRepository.saveFromNode(...)
               UPDATE iif_metric_pg_points SET eff_end_dt = now  (close previous)
               INSERT INTO iif_metric_pg_points                   (insert new)
+  └── publisher.publish() — Kafka publish (inside TX boundary, before commit)
   commit (or rollback all six statements together)
 ```
 
-If any of the six statements fails, all six roll back — no partial SCD2 state is ever committed.
+If any of the six statements fails, all six roll back — no partial SCD2 state is ever committed. The Kafka publish also occurs inside the outer transaction boundary: if publish fails, all six DB writes roll back too.
 
-The `CompletableFuture` lookups (`policyMasterService.findByAgreementProductNumber`, `policyAorService.findByAgreementProductNumber`) run on worker threads **before** the transaction opens, so they are not included in the transaction boundary.
+The `CompletableFuture` lookups inside `enrich()` (`policyMasterService`, `policyAorService`) run on ForkJoinPool threads outside the transaction context — which is intentional, as they are read-only cache lookups that do not need transactional protection.
 
 ### Why the control table writes are separate transactions
 

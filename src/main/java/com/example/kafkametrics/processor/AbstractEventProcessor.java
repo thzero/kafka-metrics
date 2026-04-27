@@ -38,7 +38,7 @@ public abstract class AbstractEventProcessor<T> implements IEventProcessor {
     }
 
     @Override
-    public final void process(EventHeader incomingHeader, JsonNode payload) {
+    public void process(EventHeader incomingHeader, JsonNode payload) {
         String messageId = incomingHeader.messageId();
 
         T output = processInternal(incomingHeader, payload, messageId);

@@ -11,18 +11,26 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 @Component
+@Transactional
 public class IifMetricsEventProcessor extends MetricsEventProcessor<JsonNode> {
 
     private static final Logger log = LoggerFactory.getLogger(IifMetricsEventProcessor.class);
 
     private final IifMetricsRawProcessorService iifMetricsRawProcessorService;
+    private final IifMetricsIncludedProcessorService iifMetricsIncludedProcessorService;
+    private final IifMetricsPgPointsProcessorService iifMetricsPgPointsProcessorService;
 
     public IifMetricsEventProcessor(KafkaProducerService publisher, ObjectMapper objectMapper,
-                                       IifMetricsRawProcessorService iifMetricsRawProcessorService) {
+                                       IifMetricsRawProcessorService iifMetricsRawProcessorService,
+                                       IifMetricsIncludedProcessorService iifMetricsIncludedProcessorService,
+                                       IifMetricsPgPointsProcessorService iifMetricsPgPointsProcessorService) {
         super(publisher, objectMapper);
         this.iifMetricsRawProcessorService = iifMetricsRawProcessorService;
+        this.iifMetricsIncludedProcessorService = iifMetricsIncludedProcessorService;
+        this.iifMetricsPgPointsProcessorService = iifMetricsPgPointsProcessorService;
     }
 
     @Override
@@ -35,6 +43,8 @@ public class IifMetricsEventProcessor extends MetricsEventProcessor<JsonNode> {
                 .orElseThrow(() -> new RequiredFieldException("agreementProductNbr"));
 
         iifMetricsRawProcessorService.enrich(messageId, agreementProductNbr, node);
+        iifMetricsIncludedProcessorService.process(messageId, agreementProductNbr, node);
+        iifMetricsPgPointsProcessorService.process(messageId, agreementProductNbr, node);
 
         return node;
     }

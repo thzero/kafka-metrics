@@ -33,21 +33,15 @@ public class IifMetricsRawProcessorService {
     private final IPolicyMasterService policyMasterService;
     private final IPolicyAorService policyAorService;
     private final IIifMetricsRawRepository iifMetricsRawRepository;
-    private final IifMetricsIncludedProcessorService iifMetricsIncludedProcessorService;
-    private final IifMetricsPgPointsProcessorService iifMetricsPgPointsProcessorService;
     private final long lookupTimeoutMs;
 
     public IifMetricsRawProcessorService(IPolicyMasterService policyMasterService,
                                           IPolicyAorService policyAorService,
                                           IIifMetricsRawRepository iifMetricsRawRepository,
-                                          IifMetricsIncludedProcessorService iifMetricsIncludedProcessorService,
-                                          IifMetricsPgPointsProcessorService iifMetricsPgPointsProcessorService,
                                           AppProperties appProperties) {
         this.policyMasterService = policyMasterService;
         this.policyAorService = policyAorService;
         this.iifMetricsRawRepository = iifMetricsRawRepository;
-        this.iifMetricsIncludedProcessorService = iifMetricsIncludedProcessorService;
-        this.iifMetricsPgPointsProcessorService = iifMetricsPgPointsProcessorService;
         this.lookupTimeoutMs = appProperties.getProcessing().getLookupTimeoutMs();
     }
 
@@ -78,7 +72,5 @@ public class IifMetricsRawProcessorService {
         node.put("assigned", aor.getAssigned());
 
         iifMetricsRawRepository.saveFromNode(messageId, agreementProductNbr, node);
-        iifMetricsIncludedProcessorService.process(messageId, agreementProductNbr, node);
-        iifMetricsPgPointsProcessorService.process(messageId, agreementProductNbr, node);
     }
 }
