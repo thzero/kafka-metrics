@@ -341,119 +341,102 @@ spring:
 
 ## Project Structure
 
-The codebase is split into two logical modules. The **skeleton** contains zero metric-specific knowledge and is reusable for any Kafka processor. The **metric module** contains everything specific to a given metric type (IIF is the example here).
+The repository is a Gradle multi-module build. The **base module** (`kafkametricsbase`) is a reusable `java-library` skeleton with zero metric-specific knowledge. The **IIF module** (`kafkametricsiif`) is a runnable Spring Boot application that depends on the base and provides all metric-specific logic.
 
 ```
-src/main/java/com/example/kafkametrics/
+kafka.metrics/                            ← root (no source, build coordination only)
+├── kafkametricsbase/                     ← skeleton library (java-library, no bootJar)
+│   └── src/main/java/com/example/kafkametrics/
+│       ├── api/
+│       │   ├── ConfigController.java         # GET /api/config — configuration view
+│       │   ├── QueryController.java          # REST query endpoints
+│       │   └── TimeRangeHelper.java          # default timestamp resolution
+│       ├── config/
+│       │   └── AppProperties.java            # @ConfigurationProperties for app.*
+│       ├── control/
+│       │   ├── IControlService.java
+│       │   ├── ControlServiceImpl.java       # JPA implementation
+│       │   ├── ControlStatus.java
+│       │   ├── ReceivedRecord.java           # entity — unique constraint on messageId
+│       │   ├── IReceivedRecordRepository.java
+│       │   ├── PublishedRecord.java          # entity
+│       │   └── IPublishedRecordRepository.java
+│       ├── deadletter/
+│       │   ├── IDeadLetterService.java
+│       │   ├── DeadLetterServiceImpl.java    # JPA implementation
+│       │   ├── DeadLetterRecord.java         # entity
+│       │   ├── IDeadLetterRepository.java
+│       │   └── ReasonCode.java              # enum
+│       ├── health/
+│       │   └── ProcessorHealthIndicator.java
+│       ├── kafka/
+│       │   ├── KafkaConsumerConfig.java      # consumer + scheduler beans
+│       │   ├── KafkaConsumerListener.java    # @KafkaListener — main pipeline
+│       │   ├── KafkaProducerConfig.java      # transactional producer beans
+│       │   ├── KafkaProducerService.java     # publish(key, payload, topic)
+│       │   ├── KafkaTopicConfig.java
+│       │   ├── DatabaseException.java
+│       │   ├── KafkaPublishException.java
+│       │   ├── ProcessingException.java
+│       │   ├── ReasonCodeException.java
+│       │   └── RequiredFieldException.java   # dead-letters on lookup miss
+│       ├── logging/
+│       │   └── MdcContext.java              # MDC set/clear helpers
+│       ├── model/
+│       │   ├── EventHeader.java             # record — messageId, interactionId, etc.
+│       │   ├── KafkaMessage.java            # record — header + payload envelope
+│       │   └── OutboundEnvelope.java        # record — outbound header + output payload
+│       ├── services/processor/
+│       │   ├── IEventProcessor.java         # interface — process(EventHeader, JsonNode)
+│       │   ├── AbstractEventProcessor.java  # template: processInternal → serialize → publish
+│       │   └── metrics/
+│       │       └── MetricsEventProcessor.java   # abstract base for metrics processors
+│       └── util/
+│           └── JsonNodes.java               # safe JsonNode field accessors
 │
-│  ┌─────────────────────────────────────────────────────────────────┐
-│  │  SKELETON — reusable for any Kafka consumer application         │
-│  └─────────────────────────────────────────────────────────────────┘
-├── KafkaMetricsApplication.java
-├── api/
-│   ├── ConfigController.java            # GET /api/config — configuration view
-│   ├── QueryController.java             # REST query endpoints
-│   └── TimeRangeHelper.java             # default timestamp resolution
-├── config/
-│   └── AppProperties.java               # @ConfigurationProperties for app.*
-├── control/
-│   ├── IControlService.java             # interface
-│   ├── ControlServiceImpl.java          # JPA implementation
-│   ├── ControlStatus.java
-│   ├── ReceivedRecord.java              # entity — unique constraint on messageId
-│   ├── IReceivedRecordRepository.java
-│   ├── PublishedRecord.java             # entity
-│   └── IPublishedRecordRepository.java
-├── deadletter/
-│   ├── IDeadLetterService.java          # interface
-│   ├── DeadLetterServiceImpl.java       # JPA implementation
-│   ├── DeadLetterRecord.java            # entity
-│   ├── IDeadLetterRepository.java
-│   └── ReasonCode.java                  # enum
-├── health/
-├── kafka/
-│   ├── KafkaConsumerConfig.java         # consumer + scheduler beans
-│   ├── KafkaConsumerListener.java       # @KafkaListener — main pipeline
-│   ├── KafkaProducerConfig.java         # transactional producer bean
-│   ├── KafkaProducerService.java        # publish(key, payload, topic)
-│   ├── KafkaPublishException.java
-│   ├── KafkaTopicConfig.java
-│   ├── DatabaseException.java
-│   ├── ProcessingException.java
-│   ├── ReasonCodeException.java
-│   └── RequiredFieldException.java      # dead-letters on cache miss
-├── logging/
-│   └── MdcContext.java                  # MDC set/clear helpers
-├── model/
-│   ├── EventHeader.java                 # record — interactionId, messageId, etc.
-│   ├── KafkaMessage.java                # record — header + payload envelope
-│   └── OutboundEnvelope.java            # record — outbound header + output payload
-├── processor/
-│   ├── IEventProcessor.java             # interface — process(EventHeader, JsonNode)
-│   └── AbstractEventProcessor.java      # template: processInternal → serialize → publish
-├── util/
-│   └── JsonNodes.java                   # safe JsonNode field accessors
-│
-│  ┌─────────────────────────────────────────────────────────────────┐
-│  │  METRIC MODULE (example: IIF) — depends on skeleton, not vice versa │
-│  └─────────────────────────────────────────────────────────────────┘
-├── repository/
-│   ├── lookup/                          # JPA entities + repositories for reference data
-│   │   ├── PolicyMaster.java                # entity — policy reference data
-│   │   ├── IPolicyMasterRepository.java
-│   │   ├── PolicyAor.java                   # entity — agent of record
-│   │   ├── IPolicyAorRepository.java
-│   │   ├── Producer.java                    # entity — agencyNbr → bonusPrimaryAgencyNbr + cfmCd
-│   │   ├── IProducerRepository.java
-│   │   ├── CfmPgPoints.java                 # entity — cfmCd + product combo → pgPointsValue
-│   │   ├── ICfmPgPointsRepository.java
-│   │   └── IifDataSeeder.java               # seeds all reference tables on startup
-│   └── metrics/                         # SCD2 IIF persistence
-│       ├── EffectiveDateConstants.java      # HIGH_DATE sentinel
-│       └── iif/
-│           ├── IifMetricsRaw.java               # SCD2 entity
-│           ├── IIifMetricsRawRepository.java
-│           ├── IIifMetricsRawRepositoryCustom.java
-│           ├── IIifMetricsRawRepositoryCustomImpl.java   # SCD2 close + insert
-│           ├── IifMetricInclusion.java          # SCD2 entity
-│           ├── IIifMetricInclusionRepository.java
-│           ├── IIifMetricInclusionRepositoryCustom.java
-│           ├── IIifMetricInclusionRepositoryCustomImpl.java
-│           ├── IifMetricsPgPoints.java          # SCD2 entity
-│           ├── IIifMetricsPgPointsRepository.java
-│           ├── IIifMetricsPgPointsRepositoryCustom.java
-│           └── IIifMetricsPgPointsRepositoryCustomImpl.java
-├── services/
-│   ├── metrics/
-│   │   └── lookup/                      # cached reference-data service layer
-│   │       ├── IPolicyMasterService.java        # interface — findByAgreementProductNumber
-│   │       ├── PolicyMasterServiceImpl.java     # @Cacheable("policyMaster"), throws on miss
-│   │       ├── IPolicyAorService.java           # interface — findByAgreementProductNumber
-│   │       ├── PolicyAorServiceImpl.java        # @Cacheable("policyAor"), throws on miss
-│   │       ├── IProducerService.java            # interface — findByAgencyNbr
-│   │       └── ProducerServiceImpl.java         # @Cacheable("producer"), throws on miss
-│   └── processor/
-│       └── metrics/
-│           ├── MetricsEventProcessor.java       # abstract base for metrics processors
-│           └── iif/
-│               ├── IifMetricsEventProcessor.java        # @Service @Transactional — orchestrator
-│               ├── IifMetricsRawProcessorService.java   # @Service — enriches + writes iif_metrics_raw
-│               ├── IifMetricsIncludedProcessorService.java
-│               └── IifMetricsPgPointsProcessorService.java
+└── kafkametricsiif/                      ← IIF runnable application (Spring Boot)
+    └── src/main/java/com/example/kafkametrics/
+        ├── KafkaMetricsApplication.java
+        ├── repository/
+        │   ├── lookup/                       # JPA entities + repos for reference data
+        │   │   ├── PolicyMaster.java             # entity
+        │   │   ├── IPolicyMasterRepository.java
+        │   │   ├── PolicyAor.java                # entity — agent of record
+        │   │   ├── IPolicyAorRepository.java
+        │   │   ├── Producer.java                 # entity — agencyNbr → cfmCd
+        │   │   ├── IProducerRepository.java
+        │   │   ├── CfmPgPoints.java              # entity — cfmCd + product → pgPointsValue
+        │   │   ├── ICfmPgPointsRepository.java
+        │   │   └── IifDataSeeder.java            # seeds reference tables on startup
+        │   └── metrics/
+        │       ├── EffectiveDateConstants.java   # HIGH_DATE SCD2 sentinel
+        │       └── iif/                          # SCD2 IIF persistence
+        │           ├── IifMetricsRaw.java + repo + customImpl
+        │           ├── IifMetricInclusion.java   + repo + customImpl
+        │           └── IifMetricsPgPoints.java   + repo + customImpl
+        └── services/
+            ├── metrics/lookup/               # cached reference-data service layer
+            │   ├── IPolicyMasterService.java / PolicyMasterServiceImpl.java   # @Cacheable
+            │   ├── IPolicyAorService.java    / PolicyAorServiceImpl.java      # @Cacheable
+            │   └── IProducerService.java     / ProducerServiceImpl.java       # @Cacheable
+            └── processor/metrics/iif/        # IIF-specific processing
+                ├── IifMetricsEventProcessor.java          # @Service @Transactional — orchestrator
+                ├── IifMetricsRawProcessorService.java     # enriches + writes iif_metrics_raw
+                ├── IifMetricsIncludedProcessorService.java
+                └── IifMetricsPgPointsProcessorService.java
+```
 
-src/test/java/com/example/kafkametrics/
-├── api/
-│   ├── ConfigControllerTest.java
-│   └── QueryControllerTest.java
-├── control/
-│   └── ControlServiceImplTest.java
-├── deadletter/
-│   └── DeadLetterServiceImplTest.java
-├── integration/
-│   └── KafkaIntegrationTest.java        # @EmbeddedKafka full pipeline test
-├── kafka/
-│   └── KafkaConsumerListenerTest.java
-└── processor/
+### Tests
+
+```
+kafkametricsbase/src/test/
+├── api/ConfigControllerTest.java, QueryControllerTest.java
+├── control/ControlServiceImplTest.java
+├── deadletter/DeadLetterServiceImplTest.java
+└── kafka/KafkaConsumerListenerTest.java
+
+kafkametricsiif/src/test/
+└── integration/KafkaIntegrationTest.java    # @EmbeddedKafka full pipeline test
 ```
 
 ---
@@ -595,23 +578,23 @@ Two independent profile axes control behaviour at startup:
 
 **Local dev (readable logs + Prometheus — default):**
 ```powershell
-.\gradlew bootRun
+.\gradlew :kafkametricsiif:bootRun
 ```
 
 **Local dev with JSON logs (e.g. testing log aggregation):**
 ```powershell
-.\gradlew bootRun --args='--spring.profiles.active=prometheus'
+.\gradlew :kafkametricsiif:bootRun --args='--spring.profiles.active=prometheus'
 ```
 
 **Work (Datadog, JSON logs):**
 ```powershell
 $env:DD_API_KEY = "your-api-key"
 $env:SPRING_PROFILES_ACTIVE = "datadog"
-.\gradlew bootRun
+.\gradlew :kafkametricsiif:bootRun
 ```
 Or as a one-liner:
 ```bash
-DD_API_KEY=your-api-key ./gradlew bootRun --args='--spring.profiles.active=datadog'
+DD_API_KEY=your-api-key ./gradlew :kafkametricsiif:bootRun --args='--spring.profiles.active=datadog'
 ```
 
 The `kafka.processor.*` counters and timers appear in Datadog automatically under those metric names. The `/actuator/prometheus` endpoint is only available under the `prometheus` profile.
@@ -669,7 +652,7 @@ The provisioned dashboard auto-loads and shows:
 docker compose up -d
 
 # 2. Start the application (new terminal)
-.\gradlew bootRun
+.\gradlew :kafkametricsiif:bootRun
 
 # 3. Generate test messages
 gen-messages.cmd 100

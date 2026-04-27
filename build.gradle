@@ -1,65 +1,63 @@
 plugins {
-    id 'java'
-    id 'org.springframework.boot' version '3.4.1'
-    id 'io.spring.dependency-management' version '1.1.7'
-    id 'com.diffplug.spotless' version '6.25.0'
-}
-
-group = 'com.example'
-version = '0.0.1-SNAPSHOT'
-
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(21)
-    }
-}
-
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter'
-    implementation 'org.springframework.boot:spring-boot-starter-cache'
-    implementation 'com.github.ben-manes.caffeine:caffeine'
-    implementation 'org.springframework.boot:spring-boot-starter-web'
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-actuator'
-    implementation 'org.springframework.kafka:spring-kafka'
-    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
-    runtimeOnly 'com.h2database:h2'
-    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
-    runtimeOnly 'io.micrometer:micrometer-registry-datadog'
-
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testImplementation 'org.springframework.kafka:spring-kafka-test'
-}
-
-tasks.withType(JavaCompile).configureEach {
-    options.compilerArgs << '-Xlint:all' << '-Xlint:-processing' << '-Xlint:-serial'
-    options.deprecation = true
-    options.warnings = true
-}
-
-test {
-    useJUnitPlatform()
+    id 'org.springframework.boot' version '3.4.1' apply false
+    id 'io.spring.dependency-management' version '1.1.7' apply false
+    id 'com.diffplug.spotless' version '6.25.0' apply false
 }
 
 // ---------------------------------------------------------------------------
-// Spotless — import ordering, unused import removal, trailing whitespace.
-// Run `./gradlew spotlessApply` to auto-fix, `./gradlew spotlessCheck` to gate.
-//
-// Import groups (blank line between each):
-//   1. com.example.*          — project-internal
-//   2. (everything else)      — third-party (com.fasterxml, io, jakarta, org)
-//   3. java.*, javax.*        — JDK standard library
+// Shared configuration applied to every subproject.
 // ---------------------------------------------------------------------------
-spotless {
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'io.spring.dependency-management'
+    apply plugin: 'com.diffplug.spotless'
+
+    group = 'com.example'
+    version = '0.0.1-SNAPSHOT'
+
     java {
-        importOrder('com.example', '', 'java', 'javax')
-        removeUnusedImports()
-        trimTrailingWhitespace()
-        endWithNewline()
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(21)
+        }
+    }
+
+    repositories {
+        mavenCentral()
+    }
+
+    // Import the Spring Boot BOM so all subprojects share consistent versions.
+    dependencyManagement {
+        imports {
+            mavenBom org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES
+        }
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.compilerArgs << '-parameters' << '-Xlint:all' << '-Xlint:-processing' << '-Xlint:-serial'
+        options.deprecation = true
+        options.warnings = true
+    }
+
+    test {
+        useJUnitPlatform()
+    }
+
+    // ---------------------------------------------------------------------------
+    // Spotless — import ordering, unused import removal, trailing whitespace.
+    // Run `./gradlew spotlessApply` to auto-fix, `./gradlew spotlessCheck` to gate.
+    //
+    // Import groups (blank line between each):
+    //   1. com.example.*          — project-internal
+    //   2. (everything else)      — third-party (com.fasterxml, io, jakarta, org)
+    //   3. java.*, javax.*        — JDK standard library
+    // ---------------------------------------------------------------------------
+    spotless {
+        java {
+            importOrder('com.example', '', 'java', 'javax')
+            removeUnusedImports()
+            trimTrailingWhitespace()
+            endWithNewline()
+        }
     }
 }
 

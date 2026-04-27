@@ -1,0 +1,17 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
+// kafkametricsiif is the runnable Spring Boot application.
+// All base Spring Boot starters are inherited transitively via kafkametricsbase.
+
+dependencies {
+    implementation project(':kafkametricsbase')
+
+    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+    runtimeOnly 'io.micrometer:micrometer-registry-datadog'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}

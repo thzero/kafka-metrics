@@ -1,0 +1,23 @@
+plugins {
+    id 'java-library'
+}
+
+// kafkametricsbase is a plain library — no bootJar, no main class.
+// The Spring Boot BOM is imported by the root subprojects block.
+
+dependencies {
+    // Expose Spring Boot starters as API so dependents inherit them transitively.
+    api 'org.springframework.boot:spring-boot-starter'
+    api 'org.springframework.boot:spring-boot-starter-cache'
+    api 'com.github.ben-manes.caffeine:caffeine'
+    api 'org.springframework.boot:spring-boot-starter-web'
+    api 'org.springframework.boot:spring-boot-starter-data-jpa'
+    api 'org.springframework.boot:spring-boot-starter-actuator'
+    api 'org.springframework.kafka:spring-kafka'
+    api 'net.logstash.logback:logstash-logback-encoder:7.4'
+
+    // H2 needed at test runtime for @DataJpaTest slices.
+    testRuntimeOnly 'com.h2database:h2'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}

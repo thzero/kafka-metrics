@@ -1,1 +1,3 @@
 rootProject.name = 'kafka-metrics'
+include 'kafkametricsbase'
+include 'kafkametricsiif'
