@@ -1,0 +1,16 @@
+meta {
+  name: Info
+  type: http
+  seq: 11
+}
+
+get {
+  url: {{baseUrl}}/actuator/info
+  body: none
+  auth: none
+}
+
+docs {
+  Returns application info (build version, name, etc.) if configured via spring.info.* properties.
+  Returns an empty object by default in this project.
+}

@@ -1,0 +1,16 @@
+# Profile: prometheus (default)
+# Active at home / locally with docker compose up -d
+#
+# Exposes /actuator/prometheus for Prometheus scraping.
+# Prometheus scrapes every 5s (see prometheus.yml).
+# Grafana at http://localhost:3000 auto-provisions Prometheus as datasource.
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  datadog:
+    metrics:
+      export:
+        enabled: false

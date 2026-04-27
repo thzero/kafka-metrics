@@ -1,0 +1,24 @@
+# Profile: datadog
+# Active at work where a Datadog Agent or direct API push is available.
+#
+# Requires:
+#   DD_API_KEY  — your Datadog API key (set as an environment variable)
+#
+# Activate:
+#   export SPRING_PROFILES_ACTIVE=datadog   (Linux/Mac)
+#   $env:SPRING_PROFILES_ACTIVE="datadog"   (PowerShell)
+#   set SPRING_PROFILES_ACTIVE=datadog      (cmd)
+#
+# Or at startup:
+#   java -jar app.jar --spring.profiles.active=datadog
+#   gradle bootRun --args='--spring.profiles.active=datadog'
+#
+# Metrics are pushed to Datadog every 10 seconds via the REST API (no Agent needed).
+# To use the Datadog Agent instead, set uri to: http://localhost:8125 (DogStatsD)
+# and switch the registry to micrometer-registry-statsd with Datadog flavor.
+
+management:
+  datadog:
+    api-key: ${DD_API_KEY}
+    step: 10s
+    # uri: https://api.datadoghq.com  # default — change to https://api.datadoghq.eu for EU

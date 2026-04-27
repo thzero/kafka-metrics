@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: kafka-processor
+    # The Spring Boot app runs on the host, not in Docker.
+    # host.docker.internal resolves to the host machine from inside a container.
+    static_configs:
+      - targets: ['host.docker.internal:8080']
+    metrics_path: /actuator/prometheus

@@ -1,0 +1,33 @@
+meta {
+  name: Get Dead Letter
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/api/deadletter
+  body: none
+  auth: none
+}
+
+params:query {
+  ~startTimestamp: 2026-03-30T00:00:00Z
+  ~endTimestamp: 2026-03-30T23:59:59Z
+}
+
+docs {
+  Returns all DeadLetterRecord entries within the given time range.
+
+  startTimestamp: ISO-8601 instant (optional, defaults to now minus 12 hours)
+  endTimestamp:   ISO-8601 instant (optional, no upper bound if omitted)
+
+  Response fields per record: messageId, interactionId, reasonCode, rawPayload, failedAt
+
+  Reason codes:
+    DESERIALIZATION_ERROR  - message could not be parsed as JSON
+    INVALID_MESSAGE_ID     - body.messageId is missing or not a valid UUID
+    PROCESSING_ERROR       - exception during processing step
+    PUBLISH_ERROR          - could not publish to output topic
+    CONTROL_RECORD_ERROR   - could not persist a control record
+    DUPLICATE              - messageId already processed
+}

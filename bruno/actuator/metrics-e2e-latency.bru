@@ -1,0 +1,25 @@
+meta {
+  name: Metrics - E2E Latency
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/actuator/metrics/kafka.processor.e2e.latency
+  body: none
+  auth: none
+}
+
+params:query {
+  ~tag: eventType:NC
+}
+
+docs {
+  End-to-end latency timer — started after in-flight check, stopped in worker finally block.
+  Captures the full cycle including the configured processing delay (delay-ms).
+
+  Optional tag filter: tag=eventType:<value>
+  Event types: NC, END, TRM, RNW
+
+  Published percentiles: P50, P95, P99
+}

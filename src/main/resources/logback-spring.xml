@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Human-readable format for local development -->
+    <appender name="STDOUT_PLAIN" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) %cyan(%-40logger{40}) %X{interactionId:--} %X{messageId:--} %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Structured JSON for all other environments (prometheus/datadog profiles) -->
+    <appender name="STDOUT_JSON" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <includeMdcKeyName>interactionId</includeMdcKeyName>
+            <includeMdcKeyName>messageId</includeMdcKeyName>
+        </encoder>
+    </appender>
+
+    <!-- Async wrapper: log events are handed off to a background thread immediately,
+         so worker threads are not blocked on console I/O.
+         discardingThreshold=0: never silently drop events (default drops 20% when queue is 80% full).
+         includeCallerData=false: skip expensive stack-walk for caller class/method/line. -->
+    <appender name="ASYNC_PLAIN" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="STDOUT_PLAIN" />
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>false</includeCallerData>
+    </appender>
+
+    <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
+        <appender-ref ref="STDOUT_JSON" />
+        <queueSize>512</queueSize>
+        <discardingThreshold>0</discardingThreshold>
+        <includeCallerData>false</includeCallerData>
+    </appender>
+
+    <springProfile name="local">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_PLAIN" />
+        </root>
+    </springProfile>
+
+    <springProfile name="!local">
+        <root level="INFO">
+            <appender-ref ref="ASYNC_JSON" />
+        </root>
+    </springProfile>
+
+</configuration>

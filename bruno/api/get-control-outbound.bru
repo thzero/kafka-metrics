@@ -1,0 +1,25 @@
+meta {
+  name: Get Control Outbound
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/control/outbound
+  body: none
+  auth: none
+}
+
+params:query {
+  ~startTimestamp: 2026-03-30T00:00:00Z
+  ~endTimestamp: 2026-03-30T23:59:59Z
+}
+
+docs {
+  Returns all PublishedRecord entries within the given time range.
+
+  startTimestamp: ISO-8601 instant (optional, defaults to now minus 12 hours)
+  endTimestamp:   ISO-8601 instant (optional, no upper bound if omitted)
+
+  Response fields per record: messageId, interactionId, publishedAt
+}

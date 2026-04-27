@@ -1,0 +1,22 @@
+meta {
+  name: Health - Processor Thread Pool
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{baseUrl}}/actuator/health/processorThreadPool
+  body: none
+  auth: none
+}
+
+docs {
+  Returns health status for the ScheduledExecutorService processing pool only.
+
+  Status values:
+    UP             - pool utilization < 100%
+    OUT_OF_SERVICE - active threads >= configured capacity (pool saturated)
+    DOWN           - pool is shut down or terminating
+
+  Details: configuredThreads, activeThreads, poolSize, queuedTasks, completedTasks, utilizationPct
+}

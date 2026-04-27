@@ -1,0 +1,25 @@
+meta {
+  name: Metrics - Pipeline Latency
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/actuator/metrics/kafka.processor.pipeline.latency
+  body: none
+  auth: none
+}
+
+params:query {
+  ~tag: eventType:NC
+}
+
+docs {
+  Pipeline-only latency timer — started at top of processDeferred(), stopped in finally block.
+  Captures actual code execution time only (excludes the processing delay wait).
+
+  Optional tag filter: tag=eventType:<value>
+  Event types: NC, END, TRM, RNW
+
+  Published percentiles: P50, P95, P99
+}

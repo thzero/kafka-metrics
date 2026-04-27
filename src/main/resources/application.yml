@@ -1,0 +1,109 @@
+spring:
+  profiles:
+    # Active profiles control metrics registry and log format:
+    #   prometheus (default) — exposes /actuator/prometheus for local Prometheus/Grafana
+    #   datadog             — pushes metrics to Datadog (requires DD_API_KEY env var)
+    #   local    (default)  — human-readable log output; omit for JSON logs (CI/prod)
+    #
+    # Override at startup:
+    #   .\gradlew bootRun --args='--spring.profiles.active=prometheus'   (JSON logs, local metrics)
+    #   .\gradlew bootRun --args='--spring.profiles.active=datadog'      (JSON logs, Datadog metrics)
+    #   SPRING_PROFILES_ACTIVE=datadog java -jar app.jar
+    default: prometheus,local
+  datasource:
+    url: jdbc:h2:mem:controldb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+    hikari:
+      maximum-pool-size: 200  # match worker-threads so no thread blocks waiting for a connection
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+  h2:
+    console:
+      enabled: false
+  cache:
+    type: caffeine
+    cache-names: policyMaster,policyAor,producer,cfmPgPoints
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=15m
+
+kafka:
+  # Comma-separated list of Kafka broker addresses
+  bootstrap-servers: localhost:9092
+
+  consumer:
+    # Shared groupId across all instances for coordinated partition consumption
+    group-id: kafka-processor-group
+    # Number of consumer threads per instance. Each thread handles exactly one partition.
+    # Formula: concurrency = partitions / instances
+    # Example: 10 partitions / 10 instances = 1 thread per instance = 1 partition per instance.
+    # Setting this higher than (partitions / instances) leaves excess threads with no partition to read.
+    concurrency: 1
+
+  topic:
+    # Topic this application reads messages from
+    input: input-topic
+    # Topic this application publishes processed messages to
+    output: output-topic
+
+  producer:
+    # Transactional ID prefix for exactly-once semantics (EOS).
+    # A random UUID suffix is appended at startup to guarantee uniqueness across instances.
+    # Each restart gets a fresh ID — orphaned transactions from a previous run time out naturally.
+    transactional-id-prefix: kafkametrics-tx-${random.uuid}
+
+# -----------------------------------------------------------------------
+# Application-specific settings — not part of Kafka or Spring internals.
+# These are custom properties read directly by our application code.
+# -----------------------------------------------------------------------
+app:
+  processing:
+    # Hard timeout (ms) for the processor step (business logic + Kafka publish).
+    # If a worker thread exceeds this limit, the message is cancelled and routed to dead letter.
+    # Set to 0 to disable. Default: 10000 (10 seconds).
+    processor-timeout-ms: 10000
+    # Timeout (ms) for each individual DB lookup (PolicyMaster / PolicyAor).
+    # If either lookup exceeds this limit the message is routed to dead letter.
+    # Should be well below processor-timeout-ms. Default: 2000 (2 seconds).
+    lookup-timeout-ms: 2000
+    # How often (ms) to log a pipeline status block showing in-flight count.
+    # Logs at INFO when there is active work; at DEBUG when idle.
+    # Set to 0 to disable. Default: 10000 (10 seconds).
+    status-log-interval-ms: 10000
+    # Platform thread pool size for the ScheduledExecutorService.
+    # Only used during actual task execution — zero threads consumed while tasks wait in the delay queue.
+    # Size to the number of tasks you expect executing simultaneously (not waiting). Default: 200.
+    worker-threads: 200
+  seed-data:
+    # Set to true to seed policy_master and policy_aor with fake data on startup.
+    enabled: true
+  # Source system entity code stamped onto every outbound message header.
+  source-system-ent-cd: KAFKA-METRICS
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics  # prometheus endpoint added by application-prometheus.yml
+  endpoint:
+    health:
+      show-details: always   # expose component details at GET /actuator/health
+  health:
+    defaults:
+      enabled: true
+  metrics:
+    distribution:
+      percentiles-histogram:
+        kafka.processor.e2e.latency: true
+        kafka.processor.pipeline.latency: true
+        jvm.gc.pause: true
+      percentiles:
+        kafka.processor.e2e.latency: 0.5,0.95,0.99
+        kafka.processor.pipeline.latency: 0.5,0.95,0.99
+        jvm.gc.pause: 0.5,0.95,0.99
+
+server:
+  port: 8080

@@ -1,0 +1,22 @@
+meta {
+  name: Metrics - Messages Published
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/actuator/metrics/kafka.processor.messages.published
+  body: none
+  auth: none
+}
+
+params:query {
+  ~tag: eventType:NC
+}
+
+docs {
+  Counter — incremented when a message is successfully processed and published to the output topic.
+
+  Optional tag filter: tag=eventType:<value>
+  Event types: NC, END, TRM, RNW
+}

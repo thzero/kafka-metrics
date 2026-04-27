@@ -1,0 +1,24 @@
+meta {
+  name: Metrics
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/actuator/metrics
+  body: none
+  auth: none
+}
+
+docs {
+  Returns the list of all available metric names.
+  Use the individual metric requests below to query specific metrics.
+
+  Key application metrics:
+    kafka.processor.e2e.latency          - full cycle timer (includes delay wait)
+    kafka.processor.pipeline.latency     - worker execution timer (code only)
+    kafka.processor.messages.received    - counter, tagged by eventType
+    kafka.processor.messages.published   - counter, tagged by eventType
+    kafka.processor.messages.siphoned    - counter, tagged by eventType
+    kafka.processor.messages.failed      - counter, tagged by reason (ReasonCode)
+}

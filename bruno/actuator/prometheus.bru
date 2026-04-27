@@ -1,0 +1,20 @@
+meta {
+  name: Prometheus Scrape
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/actuator/prometheus
+  body: none
+  auth: none
+}
+
+docs {
+  Returns all metrics in Prometheus text format.
+  This is the endpoint scraped by Prometheus every 5 seconds (configured in prometheus.yml).
+
+  Includes percentile histogram buckets for:
+    kafka_processor_e2e_latency_seconds   (P50, P95, P99)
+    kafka_processor_pipeline_latency_seconds (P50, P95, P99)
+}

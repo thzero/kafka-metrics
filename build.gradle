@@ -1,0 +1,172 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'com.diffplug.spotless' version '6.25.0'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter'
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+    implementation 'com.github.ben-manes.caffeine:caffeine'
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.kafka:spring-kafka'
+    implementation 'net.logstash.logback:logstash-logback-encoder:7.4'
+    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+    runtimeOnly 'io.micrometer:micrometer-registry-datadog'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.kafka:spring-kafka-test'
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs << '-Xlint:all' << '-Xlint:-processing' << '-Xlint:-serial'
+    options.deprecation = true
+    options.warnings = true
+}
+
+test {
+    useJUnitPlatform()
+}
+
+// ---------------------------------------------------------------------------
+// Spotless — import ordering, unused import removal, trailing whitespace.
+// Run `./gradlew spotlessApply` to auto-fix, `./gradlew spotlessCheck` to gate.
+//
+// Import groups (blank line between each):
+//   1. com.example.*          — project-internal
+//   2. (everything else)      — third-party (com.fasterxml, io, jakarta, org)
+//   3. java.*, javax.*        — JDK standard library
+// ---------------------------------------------------------------------------
+spotless {
+    java {
+        importOrder('com.example', '', 'java', 'javax')
+        removeUnusedImports()
+        trimTrailingWhitespace()
+        endWithNewline()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// generateMessages — produces ready-to-send JSON Kafka message payloads.
+//
+// Usage:
+//   gradle generateMessages
+//   gradle generateMessages -Pcount=100
+//   gradle generateMessages -Pcount=200 -PpctNC=10 -PpctEND=60 -PpctTRM=10 -PpctRNW=20
+//
+// Parameters (all optional):
+//   count   — number of messages to generate (default: 50)
+//   pctNC   — % New Business       (default: 30)
+//   pctEND  — % Endorsement        (default: 45)
+//   pctTRM  — % Termination        (default:  5)
+//   pctRNW  — % Renewal            (default: 20)
+//   pctBDE  — % of END events that are backdated endorsements (default: 20)
+//   outDir  — output directory      (default: build/generated-messages)
+//
+// Percentages must sum to 100. Output is a single JSONL file (one JSON object per line)
+// written to <outDir>/messages.jsonl.
+// ---------------------------------------------------------------------------
+tasks.register('generateMessages') {
+    group = 'kafka'
+    description = 'Generates ready-to-send JSON Kafka message payloads with configurable distributions.'
+
+    // Resolve all properties at configuration time — accessing project at execution time
+    // is deprecated in Gradle 9 and will fail in Gradle 10.
+    def cfg_count  = (project.findProperty('count')  ?: '1000').toInteger()
+    def cfg_pctNC  = (project.findProperty('pctNC')  ?: '30').toInteger()
+    def cfg_pctEND = (project.findProperty('pctEND') ?: '45').toInteger()
+    def cfg_pctTRM = (project.findProperty('pctTRM') ?: '5').toInteger()
+    def cfg_pctRNW = (project.findProperty('pctRNW') ?: '20').toInteger()
+    def cfg_pctBDE = (project.findProperty('pctBDE') ?: '20').toInteger()
+    def cfg_outDir = (project.findProperty('outDir') ?: layout.buildDirectory.dir('generated-messages').get().asFile.path)
+
+    doLast {
+        int    count  = cfg_count
+        int    pctNC  = cfg_pctNC
+        int    pctEND = cfg_pctEND
+        int    pctTRM = cfg_pctTRM
+        int    pctRNW = cfg_pctRNW
+        int    pctBDE = cfg_pctBDE
+        String outDir = cfg_outDir
+
+        int total = pctNC + pctEND + pctTRM + pctRNW
+        if (total != 100) {
+            throw new GradleException("pctNC + pctEND + pctTRM + pctRNW must equal 100 (got ${total})")
+        }
+        if (pctBDE < 0 || pctBDE > 100) {
+            throw new GradleException("pctBDE must be between 0 and 100 (got ${pctBDE})")
+        }
+
+        // Build the weighted event-type bucket list
+        def types = []
+        pctNC.times  { types << [type: 'NC',  weight: 1] }
+        pctEND.times { types << [type: 'END', weight: 1] }
+        pctTRM.times { types << [type: 'TRM', weight: 1] }
+        pctRNW.times { types << [type: 'RNW', weight: 1] }
+
+        def random = new Random()
+        def outputDir = new File(outDir)
+        outputDir.mkdirs()
+
+        int ncCount = 0, endCount = 0, trmCount = 0, rnwCount = 0, bdeCount = 0
+        def lines = []
+
+        count.times { i ->
+            // Pick event type according to weighted bucket
+            def bucket = types[random.nextInt(types.size())]
+            def eventType = bucket.type
+            boolean backdated = false
+
+            if (eventType == 'END' && random.nextInt(100) < pctBDE) {
+                backdated = true
+                bdeCount++
+            }
+
+            switch (eventType) {
+                case 'NC':  ncCount++;  break
+                case 'END': endCount++; break
+                case 'TRM': trmCount++; break
+                case 'RNW': rnwCount++; break
+            }
+
+            def messageId     = UUID.randomUUID().toString()
+            def interactionId = UUID.randomUUID().toString()
+
+            def event = [interactionId: interactionId, eventType: eventType]
+            if (backdated) event.backdated = true
+
+            def payload = [event: event, body: [messageId: messageId]]
+            lines << groovy.json.JsonOutput.toJson(payload)
+        }
+
+        // Write all messages as JSONL — one JSON object per line
+        def outFile = new File(outputDir, "messages-${count}.jsonl")
+        outFile.text = lines.join('\n') + '\n'
+
+        println ""
+        println "Generated ${count} messages → ${outFile}"
+        println "  NC  (New Business):    ${ncCount}  (${Math.round(ncCount  * 100.0 / count)}%)"
+        println "  END (Endorsement):     ${endCount - bdeCount}  (${Math.round((endCount - bdeCount) * 100.0 / count)}%)"
+        println "  END (BDE backdated):   ${bdeCount}  (${Math.round(bdeCount  * 100.0 / count)}% of total, ${pctBDE}% of END)"
+        println "  TRM (Termination):     ${trmCount}  (${Math.round(trmCount  * 100.0 / count)}%)"
+        println "  RNW (Renewal):         ${rnwCount}  (${Math.round(rnwCount  * 100.0 / count)}%)"
+        println ""
+    }
+}

@@ -1,0 +1,28 @@
+meta {
+  name: Metrics - Messages Failed
+  type: http
+  seq: 9
+}
+
+get {
+  url: {{baseUrl}}/actuator/metrics/kafka.processor.messages.failed
+  body: none
+  auth: none
+}
+
+params:query {
+  ~tag: reason:PROCESSING_ERROR
+}
+
+docs {
+  Counter — incremented when a message is sent to dead letter at any pipeline stage.
+
+  Optional tag filter: tag=reason:<value>
+  Reason codes:
+    DESERIALIZATION_ERROR
+    INVALID_MESSAGE_ID
+    PROCESSING_ERROR
+    PUBLISH_ERROR
+    CONTROL_RECORD_ERROR
+    DUPLICATE
+}

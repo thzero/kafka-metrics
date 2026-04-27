@@ -1,0 +1,24 @@
+meta {
+  name: Health
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/actuator/health
+  body: none
+  auth: none
+}
+
+docs {
+  Returns full component health details (show-details: always).
+
+  Components:
+    db                  - H2 datasource ping
+    diskSpace           - available disk space
+    kafka               - broker connectivity
+    processorThreadPool - custom HealthIndicator for ScheduledExecutorService saturation
+                          Status: UP (normal) | OUT_OF_SERVICE (saturated) | DOWN (shut down)
+                          Details: configuredThreads, activeThreads, poolSize,
+                                   queuedTasks, completedTasks, utilizationPct
+}

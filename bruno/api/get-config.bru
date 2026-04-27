@@ -1,0 +1,17 @@
+meta {
+  name: Get Config
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/config
+  body: none
+  auth: none
+}
+
+docs {
+  Returns the current running configuration as JSON.
+  Includes kafka bootstrap servers, consumer group, concurrency, topic names, processing delay,
+  worker thread count, and active siphon evaluators.
+}

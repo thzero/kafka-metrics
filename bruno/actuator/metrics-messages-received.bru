@@ -1,0 +1,23 @@
+meta {
+  name: Metrics - Messages Received
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/actuator/metrics/kafka.processor.messages.received
+  body: none
+  auth: none
+}
+
+params:query {
+  ~tag: eventType:NC
+}
+
+docs {
+  Counter — incremented each time a message enters the normal processing pipeline
+  (after siphon check and in-flight duplicate check pass).
+
+  Optional tag filter: tag=eventType:<value>
+  Event types: NC, END, TRM, RNW
+}
