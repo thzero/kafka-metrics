@@ -1,0 +1,27 @@
+<configuration>
+
+  <!-- Minimal console appender — plain text, no JSON -->
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{HH:mm:ss.SSS} %-5level %-40.40logger{39} - %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <!-- Silence the noisy embedded Kafka / ZooKeeper / Kafka client chatter -->
+  <logger name="kafka"                                     level="OFF"/>
+  <logger name="org.apache.kafka"                          level="OFF"/>
+  <logger name="org.apache.zookeeper"                      level="OFF"/>
+  <logger name="state.change.logger"                       level="OFF"/>
+
+  <!-- Suppress Spring Kafka listener/container noise (partition revoked, consumer stopped, etc.) -->
+  <logger name="org.springframework.kafka"                 level="WARN"/>
+
+  <!-- Keep general Spring context and application logs at INFO -->
+  <logger name="org.springframework"                       level="INFO"/>
+  <logger name="com.example"                               level="INFO"/>
+
+  <root level="WARN">
+    <appender-ref ref="CONSOLE"/>
+  </root>
+
+</configuration>
