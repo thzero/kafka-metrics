@@ -15,17 +15,14 @@ public class CfmPgPoints {
     @Column(name = "cfm_cd")
     private String cfmCd;
 
+    @Column(name = "product_family_ent_cd")
+    private String productFamilyEntCd;
+
+    @Column(name = "product_sub_family_ent_cd")
+    private String productSubFamilyEntCd;
+
     @Column(name = "asset_product_ent_cd")
     private String assetProductEntCd;
-
-    @Column(name = "product_family_cd")
-    private String productFamilyCd;
-
-    @Column(name = "product_sub_family_cd")
-    private String productSubFamilyCd;
-
-    @Column(name = "asset_product_cd")
-    private String assetProductCd;
 
     @Column(name = "pg_points_value")
     private Integer pgPointsValue;
@@ -35,17 +32,14 @@ public class CfmPgPoints {
     public String getCfmCd() { return cfmCd; }
     public void setCfmCd(String cfmCd) { this.cfmCd = cfmCd; }
 
+    public String getProductFamilyEntCd() { return productFamilyEntCd; }
+    public void setProductFamilyEntCd(String productFamilyEntCd) { this.productFamilyEntCd = productFamilyEntCd; }
+
+    public String getProductSubFamilyEntCd() { return productSubFamilyEntCd; }
+    public void setProductSubFamilyEntCd(String productSubFamilyEntCd) { this.productSubFamilyEntCd = productSubFamilyEntCd; }
+
     public String getAssetProductEntCd() { return assetProductEntCd; }
     public void setAssetProductEntCd(String assetProductEntCd) { this.assetProductEntCd = assetProductEntCd; }
-
-    public String getProductFamilyCd() { return productFamilyCd; }
-    public void setProductFamilyCd(String productFamilyCd) { this.productFamilyCd = productFamilyCd; }
-
-    public String getProductSubFamilyCd() { return productSubFamilyCd; }
-    public void setProductSubFamilyCd(String productSubFamilyCd) { this.productSubFamilyCd = productSubFamilyCd; }
-
-    public String getAssetProductCd() { return assetProductCd; }
-    public void setAssetProductCd(String assetProductCd) { this.assetProductCd = assetProductCd; }
 
     public Integer getPgPointsValue() { return pgPointsValue; }
     public void setPgPointsValue(Integer pgPointsValue) { this.pgPointsValue = pgPointsValue; }

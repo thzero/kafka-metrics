@@ -49,6 +49,7 @@ class IifMetricsRawProcessorServiceTest {
     pm.setAgreementProductNumber("AGR001");
     pm.setOriginalPolicyEffectiveDate(effectiveDate);
     pm.setScenarioCd(scenarioCd);
+    pm.setAssetProductEntCd("auto");
     return pm;
   }
 
@@ -72,6 +73,7 @@ class IifMetricsRawProcessorServiceTest {
 
     assertThat(node.get("originalPolicyEffectiveDate").asText()).isEqualTo("2020-06-01");
     assertThat(node.get("scenarioCd").asText()).isEqualTo("SC01");
+    assertThat(node.get("assetProductEntCd").asText()).isEqualTo("auto");
     assertThat(node.get("agencyNbr").asText()).isEqualTo("AGENCY01");
     assertThat(node.get("assigned").asBoolean()).isTrue();
     verify(iifMetricsRawRepository).saveFromNode(eq("msg-1"), eq("AGR001"), any());

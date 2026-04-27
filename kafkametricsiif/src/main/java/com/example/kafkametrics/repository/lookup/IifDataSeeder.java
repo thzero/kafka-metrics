@@ -26,6 +26,7 @@ public class IifDataSeeder implements CommandLineRunner {
 
     private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
     private static final String[] SCENARIO_CODES = { "NEW", "RENEWAL", "REWRITE" };
+    private static final String[] ASSET_PRODUCT_ENT_CODES = { "auto", "trailer", "home", "condo", "renters" };
 
     private static final int POLICY_COUNT = 1000;
     private static final int AOR_COUNT = 250;
@@ -58,6 +59,7 @@ public class IifDataSeeder implements CommandLineRunner {
             pm.setOriginalPolicyEffectiveDate(randomDate(
                     LocalDate.of(2015, 1, 1), LocalDate.of(2025, 12, 31)));
             pm.setScenarioCd(SCENARIO_CODES[random.nextInt(SCENARIO_CODES.length)]);
+            pm.setAssetProductEntCd(ASSET_PRODUCT_ENT_CODES[random.nextInt(ASSET_PRODUCT_ENT_CODES.length)]);
             policies.add(pm);
         }
         policyMasterRepository.saveAll(policies);
@@ -125,9 +127,9 @@ public class IifDataSeeder implements CommandLineRunner {
             for (String[] combo : combos) {
                 CfmPgPoints row = new CfmPgPoints();
                 row.setCfmCd(cfmCd);
-                row.setProductFamilyCd(combo[0]);
-                row.setProductSubFamilyCd(combo[1]);
-                row.setAssetProductCd(combo[2]);
+                row.setProductFamilyEntCd(combo[0]);
+                row.setProductSubFamilyEntCd(combo[1]);
+                row.setAssetProductEntCd(combo[2]);
                 row.setPgPointsValue(pgPointChoices[random.nextInt(pgPointChoices.length)]);
                 cfmRows.add(row);
             }

@@ -40,19 +40,19 @@ public class IifMetricsPgPointsProcessorService {
 
         String agencyNbr = JsonNodes.getText(node, "agencyNbr")
                 .orElseThrow(() -> new RequiredFieldException("agencyNbr"));
-        String productFamilyCd = JsonNodes.getText(node, "productFamilyCd")
-                .orElseThrow(() -> new RequiredFieldException("productFamilyCd"));
-        String productSubFamilyCd = JsonNodes.getText(node, "productSubFamilyCd")
-                .orElseThrow(() -> new RequiredFieldException("productSubFamilyCd"));
-        String assetProductCd = JsonNodes.getText(node, "assetProductCd")
-                .orElseThrow(() -> new RequiredFieldException("assetProductCd"));
+        String productFamilyEntCd = JsonNodes.getText(node, "productFamilyEntCd")
+                .orElseThrow(() -> new RequiredFieldException("productFamilyEntCd"));
+        String productSubFamilyEntCd = JsonNodes.getText(node, "productSubFamilyEntCd")
+                .orElseThrow(() -> new RequiredFieldException("productSubFamilyEntCd"));
+        String assetProductEntCd = JsonNodes.getText(node, "assetProductEntCd")
+                .orElseThrow(() -> new RequiredFieldException("assetProductEntCd"));
 
         Producer producer = producerService.findByAgencyNbr(agencyNbr);
 
         String cfmCd = producer.getCfmCd();
         String bonusPrimaryAgencyNbr = producer.getBonusPrimaryAgencyNbr();
 
-        CfmPgPoints cfm = lookupCfmPgPoints(cfmCd, productFamilyCd, productSubFamilyCd, assetProductCd);
+        CfmPgPoints cfm = lookupCfmPgPoints(cfmCd, productFamilyEntCd, productSubFamilyEntCd, assetProductEntCd);
 
         node.put("bonusPrimaryAgencyNbr", bonusPrimaryAgencyNbr);
         node.put("cfmCode", cfmCd);
@@ -64,17 +64,17 @@ public class IifMetricsPgPointsProcessorService {
     }
 
     @Cacheable("cfmPgPoints")
-    public CfmPgPoints lookupCfmPgPoints(String cfmCd, String productFamilyCd,
-                                          String productSubFamilyCd, String assetProductCd) {
+    public CfmPgPoints lookupCfmPgPoints(String cfmCd, String productFamilyEntCd,
+                                          String productSubFamilyEntCd, String assetProductEntCd) {
         return cfmPgPointsRepository
-                .findByCfmCdAndProductFamilyCdAndProductSubFamilyCdAndAssetProductCd(
-                        cfmCd, productFamilyCd, productSubFamilyCd, assetProductCd)
+                .findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
+                        cfmCd, productFamilyEntCd, productSubFamilyEntCd, assetProductEntCd)
                 .orElseThrow(() -> {
-                    log.warn("No CfmPgPoints found for cfmCd={} productFamilyCd={} productSubFamilyCd={} assetProductCd={}",
-                            cfmCd, productFamilyCd, productSubFamilyCd, assetProductCd);
+                    log.warn("No CfmPgPoints found for cfmCd={} productFamilyEntCd={} productSubFamilyEntCd={} assetProductEntCd={}",
+                            cfmCd, productFamilyEntCd, productSubFamilyEntCd, assetProductEntCd);
                     return new RequiredFieldException("CfmPgPoints not found for cfmCd=" + cfmCd
-                            + " productFamilyCd=" + productFamilyCd + " productSubFamilyCd=" + productSubFamilyCd
-                            + " assetProductCd=" + assetProductCd);
+                            + " productFamilyEntCd=" + productFamilyEntCd + " productSubFamilyEntCd=" + productSubFamilyEntCd
+                            + " assetProductEntCd=" + assetProductEntCd);
                 });
     }
 }

@@ -43,9 +43,9 @@ class IifMetricsPgPointsProcessorServiceTest {
   private ObjectNode validNode() {
     ObjectNode node = mapper.createObjectNode();
     node.put("agencyNbr", "AGENCY01");
-    node.put("productFamilyCd", "transport");
-    node.put("productSubFamilyCd", "auto");
-    node.put("assetProductCd", "auto");
+    node.put("productFamilyEntCd", "transport");
+    node.put("productSubFamilyEntCd", "auto");
+    node.put("assetProductEntCd", "auto");
     return node;
   }
 
@@ -60,9 +60,9 @@ class IifMetricsPgPointsProcessorServiceTest {
   private CfmPgPoints cfmPgPoints(int points) {
     CfmPgPoints c = new CfmPgPoints();
     c.setCfmCd("CFM001");
-    c.setProductFamilyCd("transport");
-    c.setProductSubFamilyCd("auto");
-    c.setAssetProductCd("auto");
+    c.setProductFamilyEntCd("transport");
+    c.setProductSubFamilyEntCd("auto");
+    c.setAssetProductEntCd("auto");
     c.setPgPointsValue(points);
     return c;
   }
@@ -70,7 +70,7 @@ class IifMetricsPgPointsProcessorServiceTest {
   @Test
   void process_happyPath_enrichesNodeAndSavesToRepository() {
     when(producerService.findByAgencyNbr("AGENCY01")).thenReturn(producer("CFM001", "BONUS01"));
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyCdAndProductSubFamilyCdAndAssetProductCd(
+    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
             "CFM001", "transport", "auto", "auto"))
         .thenReturn(Optional.of(cfmPgPoints(150)));
 
@@ -97,45 +97,45 @@ class IifMetricsPgPointsProcessorServiceTest {
   }
 
   @Test
-  void process_missingProductFamilyCd_throwsRequiredFieldException() {
+  void process_missingProductFamilyEntCd_throwsRequiredFieldException() {
     ObjectNode node = mapper.createObjectNode();
     node.put("agencyNbr", "AGENCY01");
-    node.put("productSubFamilyCd", "auto");
-    node.put("assetProductCd", "auto");
+    node.put("productSubFamilyEntCd", "auto");
+    node.put("assetProductEntCd", "auto");
 
     assertThatThrownBy(() -> service.process("msg-1", "AGR001", node))
         .isInstanceOf(RequiredFieldException.class)
-        .hasMessageContaining("productFamilyCd");
+        .hasMessageContaining("productFamilyEntCd");
   }
 
   @Test
-  void process_missingProductSubFamilyCd_throwsRequiredFieldException() {
+  void process_missingProductSubFamilyEntCd_throwsRequiredFieldException() {
     ObjectNode node = mapper.createObjectNode();
     node.put("agencyNbr", "AGENCY01");
-    node.put("productFamilyCd", "transport");
-    node.put("assetProductCd", "auto");
+    node.put("productFamilyEntCd", "transport");
+    node.put("assetProductEntCd", "auto");
 
     assertThatThrownBy(() -> service.process("msg-1", "AGR001", node))
         .isInstanceOf(RequiredFieldException.class)
-        .hasMessageContaining("productSubFamilyCd");
+        .hasMessageContaining("productSubFamilyEntCd");
   }
 
   @Test
-  void process_missingAssetProductCd_throwsRequiredFieldException() {
+  void process_missingAssetProductEntCd_throwsRequiredFieldException() {
     ObjectNode node = mapper.createObjectNode();
     node.put("agencyNbr", "AGENCY01");
-    node.put("productFamilyCd", "transport");
-    node.put("productSubFamilyCd", "auto");
+    node.put("productFamilyEntCd", "transport");
+    node.put("productSubFamilyEntCd", "auto");
 
     assertThatThrownBy(() -> service.process("msg-1", "AGR001", node))
         .isInstanceOf(RequiredFieldException.class)
-        .hasMessageContaining("assetProductCd");
+        .hasMessageContaining("assetProductEntCd");
   }
 
   @Test
   void process_cfmPgPointsNotFound_throwsRequiredFieldException() {
     when(producerService.findByAgencyNbr("AGENCY01")).thenReturn(producer("CFM001", "BONUS01"));
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyCdAndProductSubFamilyCdAndAssetProductCd(
+    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
             "CFM001", "transport", "auto", "auto"))
         .thenReturn(Optional.empty());
 
@@ -157,7 +157,7 @@ class IifMetricsPgPointsProcessorServiceTest {
   @Test
   void lookupCfmPgPoints_found_returnsCfmPgPoints() {
     CfmPgPoints expected = cfmPgPoints(200);
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyCdAndProductSubFamilyCdAndAssetProductCd(
+    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
             "CFM001", "transport", "auto", "auto"))
         .thenReturn(Optional.of(expected));
 
@@ -168,7 +168,7 @@ class IifMetricsPgPointsProcessorServiceTest {
 
   @Test
   void lookupCfmPgPoints_notFound_throwsRequiredFieldException() {
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyCdAndProductSubFamilyCdAndAssetProductCd(
+    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
             "CFM001", "transport", "auto", "auto"))
         .thenReturn(Optional.empty());
 

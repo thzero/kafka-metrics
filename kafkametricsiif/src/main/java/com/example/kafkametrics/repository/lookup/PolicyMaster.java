@@ -23,6 +23,9 @@ public class PolicyMaster {
     @Column(name = "scenario_cd")
     private String scenarioCd;
 
+    @Column(name = "asset_product_ent_cd")
+    private String assetProductEntCd;
+
     public Long getId() { return id; }
 
     public String getAgreementProductNumber() { return agreementProductNumber; }
@@ -33,4 +36,7 @@ public class PolicyMaster {
 
     public String getScenarioCd() { return scenarioCd; }
     public void setScenarioCd(String scenarioCd) { this.scenarioCd = scenarioCd; }
+
+    public String getAssetProductEntCd() { return assetProductEntCd; }
+    public void setAssetProductEntCd(String assetProductEntCd) { this.assetProductEntCd = assetProductEntCd; }
 }

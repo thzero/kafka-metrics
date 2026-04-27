@@ -40,7 +40,7 @@ class KafkaConsumerListenerTest {
     private static final String IID_1 = "iid-1";
 
     private static final String VALID_PAYLOAD =
-            "{\"header\":{\"messageId\":\"00000000-0000-0000-0000-000000000001\",\"interactionId\":\"iid-1\",\"eventType\":\"TEST\"},\"payload\":{}}";
+            "{\"header\":{\"messageId\":\"00000000-0000-0000-0000-000000000001\",\"interactionId\":\"iid-1\"},\"payload\":{}}";
 
     @BeforeEach
     void setUp() {
@@ -81,7 +81,7 @@ class KafkaConsumerListenerTest {
 
     @Test
     void invalidMessageId_routesToDeadLetter_noAck() {
-        String badPayload = "{\"header\":{\"messageId\":\"not-a-uuid\",\"interactionId\":\"iid-1\",\"eventType\":\"TEST\"},\"payload\":{}}";
+        String badPayload = "{\"header\":{\"messageId\":\"not-a-uuid\",\"interactionId\":\"iid-1\"},\"payload\":{}}";
         listener.listen(record(badPayload), acknowledgment);
 
         verify(deadLetterService).handle(eq(badPayload), eq(ReasonCode.INVALID_MESSAGE_ID), eq("not-a-uuid"), eq(IID_1));
@@ -91,7 +91,7 @@ class KafkaConsumerListenerTest {
 
     @Test
     void nullMessageId_routesToDeadLetter_noAck() {
-        String noMessageIdPayload = "{\"header\":{\"interactionId\":\"iid-1\",\"eventType\":\"TEST\"},\"payload\":{}}";
+        String noMessageIdPayload = "{\"header\":{\"interactionId\":\"iid-1\"},\"payload\":{}}";
         listener.listen(record(noMessageIdPayload), acknowledgment);
 
         verify(deadLetterService).handle(eq(noMessageIdPayload), eq(ReasonCode.INVALID_MESSAGE_ID), isNull(), eq(IID_1));

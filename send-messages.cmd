@@ -24,16 +24,19 @@ if "%JSONL_FILE%"=="" (
     for /f "delims=" %%F in ('dir /b /o:-d "build\generated-messages\messages-*.jsonl" 2^>nul') do (
         if "!JSONL_FILE!"=="" set JSONL_FILE=build\generated-messages\%%F
     )
-)
-
-if "%JSONL_FILE%"=="" (
-    echo ERROR: No JSONL file found. Run gen-messages.cmd first.
-    exit /b 1
-)
-
-if not exist "%JSONL_FILE%" (
-    echo ERROR: File not found: %JSONL_FILE%
-    exit /b 1
+    if "!JSONL_FILE!"=="" (
+        echo ERROR: No JSONL file found. Run gen-messages.cmd first.
+        exit /b 1
+    )
+) else (
+    :: If the file doesn't exist as given, try the generated-messages folder
+    if not exist "%JSONL_FILE%" (
+        set JSONL_FILE=build\generated-messages\%~1
+    )
+    if not exist "!JSONL_FILE!" (
+        echo ERROR: File not found: %~1
+        exit /b 1
+    )
 )
 
 ::  Count lines in the file — find /c outputs "---------- FILE: N", grab last token

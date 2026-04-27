@@ -27,11 +27,11 @@ public class IifMetricsRaw {
     @Column(name = "asset_product_ent_cd")
     private String assetProductEntCd;
 
-    @Column(name = "product_family_cd")
-    private String productFamilyCd;
+    @Column(name = "product_family_ent_cd")
+    private String productFamilyEntCd;
 
-    @Column(name = "product_sub_family_cd")
-    private String productSubFamilyCd;
+    @Column(name = "product_sub_family_ent_cd")
+    private String productSubFamilyEntCd;
 
     @Column(name = "processed_dt", nullable = false)
     private long processedDt;
@@ -56,11 +56,11 @@ public class IifMetricsRaw {
     public String getAssetProductEntCd() { return assetProductEntCd; }
     public void setAssetProductEntCd(String assetProductEntCd) { this.assetProductEntCd = assetProductEntCd; }
 
-    public String getProductFamilyCd() { return productFamilyCd; }
-    public void setProductFamilyCd(String productFamilyCd) { this.productFamilyCd = productFamilyCd; }
+    public String getProductFamilyEntCd() { return productFamilyEntCd; }
+    public void setProductFamilyEntCd(String productFamilyEntCd) { this.productFamilyEntCd = productFamilyEntCd; }
 
-    public String getProductSubFamilyCd() { return productSubFamilyCd; }
-    public void setProductSubFamilyCd(String productSubFamilyCd) { this.productSubFamilyCd = productSubFamilyCd; }
+    public String getProductSubFamilyEntCd() { return productSubFamilyEntCd; }
+    public void setProductSubFamilyEntCd(String productSubFamilyEntCd) { this.productSubFamilyEntCd = productSubFamilyEntCd; }
 
     public long getProcessedDt() { return processedDt; }
     public void setProcessedDt(long processedDt) { this.processedDt = processedDt; }

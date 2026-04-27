@@ -602,27 +602,22 @@ The `kafka.processor.*` counters and timers appear in Datadog automatically unde
 ### 4. Generate test messages
 
 ```powershell
-# Default: 1000 messages with default distribution
+# Default: 1000 messages
 .\gradlew generateMessages
 
 # Custom count
 .\gradlew generateMessages -Pcount=200
-
-# Custom distribution (must sum to 100)
-.\gradlew generateMessages -Pcount=500 -PpctNC=30 -PpctEND=45 -PpctTRM=5 -PpctRNW=20
-
-# Custom BDE ratio within END events (default 20%)
-.\gradlew generateMessages -Pcount=100 -PpctBDE=40
 ```
+
+Messages reference the agreement product numbers and product combos seeded by `IifDataSeeder` (deterministic `Random(42)`), so every generated message will process cleanly without dead-lettering.
 
 Output is written to `build/generated-messages/messages-<count>.jsonl` — one JSON object per line.
 
 **Windows shortcut — `gen-messages.cmd`:**
 
 ```bat
-gen-messages.cmd                         :: 1000 messages, default distribution
-gen-messages.cmd 500                     :: 500 messages, default distribution
-gen-messages.cmd 200 10 60 10 20 15      :: count pctNC pctEND pctTRM pctRNW pctBDE
+gen-messages.cmd          :: 1000 messages
+gen-messages.cmd 500      :: 500 messages
 ```
 
 ### 5. Send messages to Kafka

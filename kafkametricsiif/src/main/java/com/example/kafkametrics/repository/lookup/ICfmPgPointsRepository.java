@@ -6,9 +6,9 @@ import java.util.Optional;
 
 public interface ICfmPgPointsRepository extends JpaRepository<CfmPgPoints, Long> {
 
-    Optional<CfmPgPoints> findByCfmCdAndProductFamilyCdAndProductSubFamilyCdAndAssetProductCd(
+    Optional<CfmPgPoints> findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
             String cfmCd,
-            String productFamilyCd,
-            String productSubFamilyCd,
-            String assetProductCd);
+            String productFamilyEntCd,
+            String productSubFamilyEntCd,
+            String assetProductEntCd);
 }

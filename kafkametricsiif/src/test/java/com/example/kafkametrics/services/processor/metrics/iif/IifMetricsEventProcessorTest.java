@@ -41,7 +41,7 @@ class IifMetricsEventProcessorTest {
   }
 
   private EventHeader header(String messageId) {
-    return new EventHeader(messageId, "interaction-1", "IIF_METRICS", false, "SOURCE");
+    return new EventHeader(messageId, "interaction-1", "SOURCE");
   }
 
   @Test

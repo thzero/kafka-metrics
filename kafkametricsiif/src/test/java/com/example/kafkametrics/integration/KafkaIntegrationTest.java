@@ -56,12 +56,12 @@ import java.util.concurrent.TimeUnit;
 })
 class KafkaIntegrationTest {
 
-    private static final String AGREEMENT_PRODUCT_NBR = "TEST0000000001A";
-    private static final String AGENCY_NBR            = "0TEST1";
-    private static final String CFM_CD                = "CFM0001";
-    private static final String PRODUCT_FAMILY_CD     = "transport";
-    private static final String PRODUCT_SUB_FAMILY_CD = "auto";
-    private static final String ASSET_PRODUCT_CD      = "auto";
+    private static final String AGREEMENT_PRODUCT_NBR  = "TEST0000000001A";
+    private static final String AGENCY_NBR             = "0TEST1";
+    private static final String CFM_CD                 = "CFM0001";
+    private static final String PRODUCT_FAMILY_ENT_CD     = "transport";
+    private static final String PRODUCT_SUB_FAMILY_ENT_CD = "auto";
+    private static final String ASSET_PRODUCT_ENT_CD      = "auto";
 
     @Autowired private EmbeddedKafkaBroker embeddedKafkaBroker;
     @Autowired private IReceivedRecordRepository receivedRecordRepository;
@@ -82,6 +82,7 @@ class KafkaIntegrationTest {
         pm.setAgreementProductNumber(AGREEMENT_PRODUCT_NBR);
         pm.setOriginalPolicyEffectiveDate(LocalDate.of(2020, 1, 1));
         pm.setScenarioCd("NEW");
+        pm.setAssetProductEntCd(ASSET_PRODUCT_ENT_CD);
         policyMasterRepository.save(pm);
 
         PolicyAor aor = new PolicyAor();
@@ -98,9 +99,9 @@ class KafkaIntegrationTest {
 
         CfmPgPoints cfm = new CfmPgPoints();
         cfm.setCfmCd(CFM_CD);
-        cfm.setProductFamilyCd(PRODUCT_FAMILY_CD);
-        cfm.setProductSubFamilyCd(PRODUCT_SUB_FAMILY_CD);
-        cfm.setAssetProductCd(ASSET_PRODUCT_CD);
+        cfm.setProductFamilyEntCd(PRODUCT_FAMILY_ENT_CD);
+        cfm.setProductSubFamilyEntCd(PRODUCT_SUB_FAMILY_ENT_CD);
+        cfm.setAssetProductEntCd(ASSET_PRODUCT_ENT_CD);
         cfm.setPgPointsValue(25);
         cfmPgPointsRepository.save(cfm);
     }
@@ -126,13 +127,12 @@ class KafkaIntegrationTest {
         // Act: publish a message with the fields required by IifMetricsEventProcessor
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("agreementProductNbr", AGREEMENT_PRODUCT_NBR);
-        payload.put("productFamilyCd", PRODUCT_FAMILY_CD);
-        payload.put("productSubFamilyCd", PRODUCT_SUB_FAMILY_CD);
-        payload.put("assetProductCd", ASSET_PRODUCT_CD);
+        payload.put("productFamilyEntCd", PRODUCT_FAMILY_ENT_CD);
+        payload.put("productSubFamilyEntCd", PRODUCT_SUB_FAMILY_ENT_CD);
 
         String messageId = "a0000000-0000-0000-0000-000000000001";
         KafkaMessage inputMessage = new KafkaMessage(
-                new EventHeader(messageId, "iid-integration", "TEST", null, null),
+                new EventHeader(messageId, "iid-integration", null),
                 payload);
         String serialized = Objects.requireNonNull(objectMapper.writeValueAsString(inputMessage));
 

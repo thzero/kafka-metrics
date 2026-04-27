@@ -67,6 +67,7 @@ public class IifMetricsRawProcessorService {
 
         node.put("originalPolicyEffectiveDate", pm.getOriginalPolicyEffectiveDate().toString());
         node.put("scenarioCd", pm.getScenarioCd());
+        node.put("assetProductEntCd", pm.getAssetProductEntCd());
         node.put("agencyNbr", aor.getAgencyNbr());
         node.put("assigned", aor.getAssigned());
 

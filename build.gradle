@@ -66,109 +66,100 @@ subprojects {
 }
 
 // ---------------------------------------------------------------------------
-// generateMessages — produces ready-to-send JSON Kafka message payloads.
+// generateMessages — produces ready-to-send IIF metrics Kafka message payloads.
+//
+// Agreement product numbers and product combos are derived by replicating
+// IifDataSeeder's deterministic Random(42) sequence so that every generated
+// message references data that will exist in the seeded H2/Postgres database.
 //
 // Usage:
 //   gradle generateMessages
-//   gradle generateMessages -Pcount=100
-//   gradle generateMessages -Pcount=200 -PpctNC=10 -PpctEND=60 -PpctTRM=10 -PpctRNW=20
+//   gradle generateMessages -Pcount=200
+//   gradle generateMessages -Pcount=500 -PoutDir=/tmp/msgs
 //
 // Parameters (all optional):
-//   count   — number of messages to generate (default: 50)
-//   pctNC   — % New Business       (default: 30)
-//   pctEND  — % Endorsement        (default: 45)
-//   pctTRM  — % Termination        (default:  5)
-//   pctRNW  — % Renewal            (default: 20)
-//   pctBDE  — % of END events that are backdated endorsements (default: 20)
-//   outDir  — output directory      (default: build/generated-messages)
+//   count  — number of messages to generate (default: 1000)
+//   outDir — output directory               (default: build/generated-messages)
 //
-// Percentages must sum to 100. Output is a single JSONL file (one JSON object per line)
-// written to <outDir>/messages.jsonl.
+// Output: <outDir>/messages-<count>.jsonl  (one JSON object per line)
 // ---------------------------------------------------------------------------
 tasks.register('generateMessages') {
     group = 'kafka'
-    description = 'Generates ready-to-send JSON Kafka message payloads with configurable distributions.'
+    description = 'Generates IIF metrics Kafka message payloads matched to seeded reference data.'
 
-    // Resolve all properties at configuration time — accessing project at execution time
-    // is deprecated in Gradle 9 and will fail in Gradle 10.
     def cfg_count  = (project.findProperty('count')  ?: '1000').toInteger()
-    def cfg_pctNC  = (project.findProperty('pctNC')  ?: '30').toInteger()
-    def cfg_pctEND = (project.findProperty('pctEND') ?: '45').toInteger()
-    def cfg_pctTRM = (project.findProperty('pctTRM') ?: '5').toInteger()
-    def cfg_pctRNW = (project.findProperty('pctRNW') ?: '20').toInteger()
-    def cfg_pctBDE = (project.findProperty('pctBDE') ?: '20').toInteger()
     def cfg_outDir = (project.findProperty('outDir') ?: layout.buildDirectory.dir('generated-messages').get().asFile.path)
 
     doLast {
         int    count  = cfg_count
-        int    pctNC  = cfg_pctNC
-        int    pctEND = cfg_pctEND
-        int    pctTRM = cfg_pctTRM
-        int    pctRNW = cfg_pctRNW
-        int    pctBDE = cfg_pctBDE
         String outDir = cfg_outDir
 
-        int total = pctNC + pctEND + pctTRM + pctRNW
-        if (total != 100) {
-            throw new GradleException("pctNC + pctEND + pctTRM + pctRNW must equal 100 (got ${total})")
+        // ------------------------------------------------------------------
+        // Replicate IifDataSeeder's Random(42) to derive the 250 valid
+        // agreementProductNbr values that have PolicyAor (and therefore
+        // Producer + CfmPgPoints) records in the seeded database.
+        // ------------------------------------------------------------------
+        def ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'.toCharArray()
+        def seederRandom = new Random(42)
+
+        // 1 000 policies — matches POLICY_COUNT in IifDataSeeder
+        def policies = (1..1000).collect {
+            def sb = new StringBuilder(15)
+            15.times { sb.append(ALPHA[seederRandom.nextInt(ALPHA.length)]) }
+            sb.toString()
         }
-        if (pctBDE < 0 || pctBDE > 100) {
-            throw new GradleException("pctBDE must be between 0 and 100 (got ${pctBDE})")
-        }
 
-        // Build the weighted event-type bucket list
-        def types = []
-        pctNC.times  { types << [type: 'NC',  weight: 1] }
-        pctEND.times { types << [type: 'END', weight: 1] }
-        pctTRM.times { types << [type: 'TRM', weight: 1] }
-        pctRNW.times { types << [type: 'RNW', weight: 1] }
+        // Shuffle with the same Random instance — matches Collections.shuffle(shuffled, random)
+        def shuffled = new ArrayList<>(policies)
+        Collections.shuffle(shuffled, seederRandom)
 
-        def random = new Random()
-        def outputDir = new File(outDir)
-        outputDir.mkdirs()
+        // First 250 have AOR records — matches AOR_COUNT in IifDataSeeder
+        def validApns = shuffled.subList(0, 250)
 
-        int ncCount = 0, endCount = 0, trmCount = 0, rnwCount = 0, bdeCount = 0
+        // ------------------------------------------------------------------
+        // Product combos seeded into cfm_pg_points by IifDataSeeder
+        // ------------------------------------------------------------------
+        def combos = [
+            [productFamilyEntCd: 'transport', productSubFamilyEntCd: 'auto' ],
+            [productFamilyEntCd: 'transport', productSubFamilyEntCd: 'auto' ],
+            [productFamilyEntCd: 'dwelling',  productSubFamilyEntCd: 'home' ],
+            [productFamilyEntCd: 'dwelling',  productSubFamilyEntCd: 'home' ],
+            [productFamilyEntCd: 'dwelling',  productSubFamilyEntCd: 'home' ],
+        ]
+
+        def rng   = new Random()
         def lines = []
 
-        count.times { i ->
-            // Pick event type according to weighted bucket
-            def bucket = types[random.nextInt(types.size())]
-            def eventType = bucket.type
-            boolean backdated = false
+        count.times {
+            def apn   = validApns[rng.nextInt(validApns.size())]
+            def combo = combos[rng.nextInt(combos.size())]
 
-            if (eventType == 'END' && random.nextInt(100) < pctBDE) {
-                backdated = true
-                bdeCount++
-            }
-
-            switch (eventType) {
-                case 'NC':  ncCount++;  break
-                case 'END': endCount++; break
-                case 'TRM': trmCount++; break
-                case 'RNW': rnwCount++; break
-            }
-
-            def messageId     = UUID.randomUUID().toString()
-            def interactionId = UUID.randomUUID().toString()
-
-            def event = [interactionId: interactionId, eventType: eventType]
-            if (backdated) event.backdated = true
-
-            def payload = [event: event, body: [messageId: messageId]]
-            lines << groovy.json.JsonOutput.toJson(payload)
+            def msg = [
+                header: [
+                    messageId        : UUID.randomUUID().toString(),
+                    interactionId    : UUID.randomUUID().toString(),
+                    sourceSystemEntCd: 'IIF'
+                ],
+                payload: [
+                    agreementId          : UUID.randomUUID().toString(),
+                    agreementProductNbr  : apn,
+                    productFamilyEntCd   : combo.productFamilyEntCd,
+                    productSubFamilyEntCd: combo.productSubFamilyEntCd,
+                    assetId              : String.format('ASSET%07d', rng.nextInt(9_999_999))
+                ]
+            ]
+            lines << groovy.json.JsonOutput.toJson(msg)
         }
 
-        // Write all messages as JSONL — one JSON object per line
+        def outputDir = new File(outDir)
+        outputDir.mkdirs()
         def outFile = new File(outputDir, "messages-${count}.jsonl")
         outFile.text = lines.join('\n') + '\n'
 
         println ""
-        println "Generated ${count} messages → ${outFile}"
-        println "  NC  (New Business):    ${ncCount}  (${Math.round(ncCount  * 100.0 / count)}%)"
-        println "  END (Endorsement):     ${endCount - bdeCount}  (${Math.round((endCount - bdeCount) * 100.0 / count)}%)"
-        println "  END (BDE backdated):   ${bdeCount}  (${Math.round(bdeCount  * 100.0 / count)}% of total, ${pctBDE}% of END)"
-        println "  TRM (Termination):     ${trmCount}  (${Math.round(trmCount  * 100.0 / count)}%)"
-        println "  RNW (Renewal):         ${rnwCount}  (${Math.round(rnwCount  * 100.0 / count)}%)"
+        println "Generated ${count} messages → ${outFile.absolutePath}"
+        println "  ${validApns.size()} valid agreementProductNbrs available (from seeded data)"
+        println "  ${combos.size()} product combos (transport/auto, dwelling/home, ...)"
         println ""
     }
 }
