@@ -37,7 +37,7 @@ public class IIifMetricInclusionRepositoryCustomImpl implements IIifMetricInclus
             IifMetricInclusion inclusion = new IifMetricInclusion();
             inclusion.setAgreementProductNbr(agreementProductNbr);
             inclusion.setAssetId(assetId);
-            inclusion.setProcessedDt(now);
+            inclusion.setPublishedDt(node.get("publishedDt").asLong());
             inclusion.setExcludedInd(excludedInd);
             inclusion.setEffBeginDt(now);
             inclusion.setEffEndDt(EffectiveDateConstants.HIGH_DATE);

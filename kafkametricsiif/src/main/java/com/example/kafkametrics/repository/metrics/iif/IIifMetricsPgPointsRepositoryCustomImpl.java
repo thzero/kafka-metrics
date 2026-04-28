@@ -37,7 +37,7 @@ public class IIifMetricsPgPointsRepositoryCustomImpl implements IIifMetricsPgPoi
             IifMetricsPgPoints points = new IifMetricsPgPoints();
             points.setAgreementProductNbr(agreementProductNbr);
             points.setAssetId(assetId);
-            points.setProcessedDt(now);
+            points.setPublishedDt(node.get("publishedDt").asLong());
             points.setPgPointsValue(JsonNodes.getInt(node, "pgPointsValue").orElse(null));
             points.setCfmCode(JsonNodes.getText(node, "cfmCode").orElse(null));
             points.setBonusPrimaryAgencyNbr(JsonNodes.getText(node, "bonusPrimaryAgencyNbr").orElse(null));

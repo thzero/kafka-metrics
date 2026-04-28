@@ -21,8 +21,8 @@ public class IifMetricInclusion {
     @Column(name = "asset_id")
     private String assetId;
 
-    @Column(name = "processed_dt", nullable = false)
-    private Instant processedDt;
+    @Column(name = "published_dt", nullable = false)
+    private long publishedDt;
 
     @Column(name = "excluded_ind", nullable = false)
     private boolean excludedInd;
@@ -41,8 +41,8 @@ public class IifMetricInclusion {
     public String getAssetId() { return assetId; }
     public void setAssetId(String assetId) { this.assetId = assetId; }
 
-    public Instant getProcessedDt() { return processedDt; }
-    public void setProcessedDt(Instant processedDt) { this.processedDt = processedDt; }
+    public long getPublishedDt() { return publishedDt; }
+    public void setPublishedDt(long publishedDt) { this.publishedDt = publishedDt; }
 
     public boolean isExcludedInd() { return excludedInd; }
     public void setExcludedInd(boolean excludedInd) { this.excludedInd = excludedInd; }

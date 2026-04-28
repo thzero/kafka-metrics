@@ -41,7 +41,7 @@ public class IIifMetricsRawRepositoryCustomImpl implements IIifMetricsRawReposit
             raw.setAssetProductEntCd(JsonNodes.getText(node, "assetProductEntCd").orElse(null));
             raw.setProductFamilyEntCd(JsonNodes.getText(node, "productFamilyEntCd").orElse(null));
             raw.setProductSubFamilyEntCd(JsonNodes.getText(node, "productSubFamilyEntCd").orElse(null));
-            raw.setProcessedDt(now.toEpochMilli());
+            raw.setPublishedDt(node.get("publishedDt").asLong());
             raw.setEffBeginDt(now);
             raw.setEffEndDt(EffectiveDateConstants.HIGH_DATE);
             em.persist(raw);

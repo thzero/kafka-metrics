@@ -9,9 +9,9 @@ import static org.mockito.Mockito.when;
 
 import com.example.kafkametrics.kafka.RequiredFieldException;
 import com.example.kafkametrics.repository.lookup.CfmPgPoints;
-import com.example.kafkametrics.repository.lookup.ICfmPgPointsRepository;
 import com.example.kafkametrics.repository.lookup.Producer;
 import com.example.kafkametrics.repository.metrics.iif.IIifMetricsPgPointsRepository;
+import com.example.kafkametrics.services.metrics.lookup.ICfmPgPointsService;
 import com.example.kafkametrics.services.metrics.lookup.IProducerService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,14 +22,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.Optional;
-
 @ExtendWith(MockitoExtension.class)
 class IifMetricsPgPointsProcessorServiceTest {
 
   @Mock private IIifMetricsPgPointsRepository pgPointsRepository;
   @Mock private IProducerService producerService;
-  @Mock private ICfmPgPointsRepository cfmPgPointsRepository;
+  @Mock private ICfmPgPointsService cfmPgPointsService;
 
   private IifMetricsPgPointsProcessorService service;
   private final ObjectMapper mapper = new ObjectMapper();
@@ -37,7 +35,7 @@ class IifMetricsPgPointsProcessorServiceTest {
   @BeforeEach
   void setUp() {
     service =
-        new IifMetricsPgPointsProcessorService(pgPointsRepository, producerService, cfmPgPointsRepository);
+        new IifMetricsPgPointsProcessorService(pgPointsRepository, producerService, cfmPgPointsService);
   }
 
   private ObjectNode validNode() {
@@ -70,9 +68,8 @@ class IifMetricsPgPointsProcessorServiceTest {
   @Test
   void process_happyPath_enrichesNodeAndSavesToRepository() {
     when(producerService.findByAgencyNbr("AGENCY01")).thenReturn(producer("CFM001", "BONUS01"));
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
-            "CFM001", "transport", "auto", "auto"))
-        .thenReturn(Optional.of(cfmPgPoints(150)));
+    when(cfmPgPointsService.lookup("CFM001", "transport", "auto", "auto"))
+        .thenReturn(cfmPgPoints(150));
 
     ObjectNode node = validNode();
     service.process("msg-1", "AGR001", node);
@@ -80,7 +77,6 @@ class IifMetricsPgPointsProcessorServiceTest {
     assertThat(node.get("bonusPrimaryAgencyNbr").asText()).isEqualTo("BONUS01");
     assertThat(node.get("cfmCode").asText()).isEqualTo("CFM001");
     assertThat(node.get("pgPointsValue").asInt()).isEqualTo(150);
-    assertThat(node.get("processedDt").asLong()).isGreaterThan(0);
     verify(pgPointsRepository).saveFromNode(eq("AGR001"), any());
   }
 
@@ -135,9 +131,8 @@ class IifMetricsPgPointsProcessorServiceTest {
   @Test
   void process_cfmPgPointsNotFound_throwsRequiredFieldException() {
     when(producerService.findByAgencyNbr("AGENCY01")).thenReturn(producer("CFM001", "BONUS01"));
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
-            "CFM001", "transport", "auto", "auto"))
-        .thenReturn(Optional.empty());
+    when(cfmPgPointsService.lookup("CFM001", "transport", "auto", "auto"))
+        .thenThrow(new RequiredFieldException("CfmPgPoints not found for cfmCd=CFM001"));
 
     assertThatThrownBy(() -> service.process("msg-1", "AGR001", validNode()))
         .isInstanceOf(RequiredFieldException.class)
@@ -152,28 +147,5 @@ class IifMetricsPgPointsProcessorServiceTest {
     assertThatThrownBy(() -> service.process("msg-1", "AGR001", validNode()))
         .isInstanceOf(RequiredFieldException.class)
         .hasMessageContaining("AGENCY01");
-  }
-
-  @Test
-  void lookupCfmPgPoints_found_returnsCfmPgPoints() {
-    CfmPgPoints expected = cfmPgPoints(200);
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
-            "CFM001", "transport", "auto", "auto"))
-        .thenReturn(Optional.of(expected));
-
-    CfmPgPoints result = service.lookupCfmPgPoints("CFM001", "transport", "auto", "auto");
-
-    assertThat(result.getPgPointsValue()).isEqualTo(200);
-  }
-
-  @Test
-  void lookupCfmPgPoints_notFound_throwsRequiredFieldException() {
-    when(cfmPgPointsRepository.findByCfmCdAndProductFamilyEntCdAndProductSubFamilyEntCdAndAssetProductEntCd(
-            "CFM001", "transport", "auto", "auto"))
-        .thenReturn(Optional.empty());
-
-    assertThatThrownBy(() -> service.lookupCfmPgPoints("CFM001", "transport", "auto", "auto"))
-        .isInstanceOf(RequiredFieldException.class)
-        .hasMessageContaining("CfmPgPoints not found");
   }
 }

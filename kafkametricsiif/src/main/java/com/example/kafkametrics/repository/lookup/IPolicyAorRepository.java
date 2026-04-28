@@ -2,9 +2,9 @@ package com.example.kafkametrics.repository.lookup;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
-import java.util.List;
+import java.util.Optional;
 
 public interface IPolicyAorRepository extends JpaRepository<PolicyAor, Long> {
 
-    List<PolicyAor> findByAgreementProductNumber(String agreementProductNumber);
+    Optional<PolicyAor> findByAgreementProductNumber(String agreementProductNumber);
 }

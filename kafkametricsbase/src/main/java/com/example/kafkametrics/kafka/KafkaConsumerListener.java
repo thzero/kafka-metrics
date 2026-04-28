@@ -158,7 +158,7 @@ public class KafkaConsumerListener {
 
         String interactionId = message.header().interactionId();
         String messageId = message.header().messageId();
-        String eventType = message.header().eventType() != null ? message.header().eventType() : "unknown";
+        String eventType = message.header().sourceSystemEntCd() != null ? message.header().sourceSystemEntCd() : "unknown";
 
         if (message.payload() == null) {
             log.error("Missing payload, routing to dead letter: messageId={}", messageId);

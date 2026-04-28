@@ -46,6 +46,8 @@ public class IifMetricsRawProcessorService {
 
     @Transactional
     public void process(String messageId, String agreementProductNbr, ObjectNode node) {
+        log.info("Processing IIF metrics raw messageId={} agreementProductNbr={}", messageId, agreementProductNbr);
+
         CompletableFuture<PolicyMaster> policyFuture =
                 CompletableFuture.supplyAsync(() -> policyMasterService.findByAgreementProductNumber(agreementProductNbr))
                         .orTimeout(lookupTimeoutMs, TimeUnit.MILLISECONDS);

@@ -21,8 +21,8 @@ public class IifMetricsPgPoints {
     @Column(name = "asset_id")
     private String assetId;
 
-    @Column(name = "processed_dt", nullable = false)
-    private Instant processedDt;
+    @Column(name = "published_dt", nullable = false)
+    private long publishedDt;
 
     @Column(name = "pg_points_value")
     private Integer pgPointsValue;
@@ -47,8 +47,8 @@ public class IifMetricsPgPoints {
     public String getAssetId() { return assetId; }
     public void setAssetId(String assetId) { this.assetId = assetId; }
 
-    public Instant getProcessedDt() { return processedDt; }
-    public void setProcessedDt(Instant processedDt) { this.processedDt = processedDt; }
+    public long getPublishedDt() { return publishedDt; }
+    public void setPublishedDt(long publishedDt) { this.publishedDt = publishedDt; }
 
     public Integer getPgPointsValue() { return pgPointsValue; }
     public void setPgPointsValue(Integer pgPointsValue) { this.pgPointsValue = pgPointsValue; }

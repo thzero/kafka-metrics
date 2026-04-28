@@ -15,7 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDate;
-import java.util.List;
+import java.util.Optional;
 
 @ExtendWith(MockitoExtension.class)
 class PolicyMasterServiceImplTest {
@@ -35,7 +35,7 @@ class PolicyMasterServiceImplTest {
     pm.setAgreementProductNumber("AGR001");
     pm.setOriginalPolicyEffectiveDate(LocalDate.of(2020, 1, 1));
     pm.setScenarioCd("SC01");
-    when(repository.findByAgreementProductNumber("AGR001")).thenReturn(List.of(pm));
+    when(repository.findByAgreementProductNumber("AGR001")).thenReturn(Optional.of(pm));
 
     PolicyMaster result = service.findByAgreementProductNumber("AGR001");
 
@@ -44,25 +44,8 @@ class PolicyMasterServiceImplTest {
   }
 
   @Test
-  void findByAgreementProductNumber_multipleResults_returnsFirst() {
-    PolicyMaster first = new PolicyMaster();
-    first.setAgreementProductNumber("AGR001");
-    first.setScenarioCd("FIRST");
-
-    PolicyMaster second = new PolicyMaster();
-    second.setAgreementProductNumber("AGR001");
-    second.setScenarioCd("SECOND");
-
-    when(repository.findByAgreementProductNumber("AGR001")).thenReturn(List.of(first, second));
-
-    PolicyMaster result = service.findByAgreementProductNumber("AGR001");
-
-    assertThat(result.getScenarioCd()).isEqualTo("FIRST");
-  }
-
-  @Test
   void findByAgreementProductNumber_notFound_throwsRequiredFieldException() {
-    when(repository.findByAgreementProductNumber("MISSING")).thenReturn(List.of());
+    when(repository.findByAgreementProductNumber("MISSING")).thenReturn(Optional.empty());
 
     assertThatThrownBy(() -> service.findByAgreementProductNumber("MISSING"))
         .isInstanceOf(RequiredFieldException.class)

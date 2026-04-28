@@ -33,8 +33,8 @@ public class IifMetricsRaw {
     @Column(name = "product_sub_family_ent_cd")
     private String productSubFamilyEntCd;
 
-    @Column(name = "processed_dt", nullable = false)
-    private long processedDt;
+    @Column(name = "published_dt", nullable = false)
+    private long publishedDt;
 
     @Column(name = "eff_begin_dt", nullable = false)
     private Instant effBeginDt;
@@ -62,8 +62,8 @@ public class IifMetricsRaw {
     public String getProductSubFamilyEntCd() { return productSubFamilyEntCd; }
     public void setProductSubFamilyEntCd(String productSubFamilyEntCd) { this.productSubFamilyEntCd = productSubFamilyEntCd; }
 
-    public long getProcessedDt() { return processedDt; }
-    public void setProcessedDt(long processedDt) { this.processedDt = processedDt; }
+    public long getPublishedDt() { return publishedDt; }
+    public void setPublishedDt(long publishedDt) { this.publishedDt = publishedDt; }
 
     public Instant getEffBeginDt() { return effBeginDt; }
     public void setEffBeginDt(Instant effBeginDt) { this.effBeginDt = effBeginDt; }

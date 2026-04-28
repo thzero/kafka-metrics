@@ -14,7 +14,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import java.util.List;
+import java.util.Optional;
 
 @ExtendWith(MockitoExtension.class)
 class PolicyAorServiceImplTest {
@@ -34,7 +34,7 @@ class PolicyAorServiceImplTest {
     aor.setAgreementProductNumber("AGR001");
     aor.setAgencyNbr("AGENCY01");
     aor.setAssigned(true);
-    when(repository.findByAgreementProductNumber("AGR001")).thenReturn(List.of(aor));
+    when(repository.findByAgreementProductNumber("AGR001")).thenReturn(Optional.of(aor));
 
     PolicyAor result = service.findByAgreementProductNumber("AGR001");
 
@@ -43,21 +43,8 @@ class PolicyAorServiceImplTest {
   }
 
   @Test
-  void findByAgreementProductNumber_multipleResults_returnsFirst() {
-    PolicyAor first = new PolicyAor();
-    first.setAgencyNbr("FIRST");
-    PolicyAor second = new PolicyAor();
-    second.setAgencyNbr("SECOND");
-    when(repository.findByAgreementProductNumber("AGR001")).thenReturn(List.of(first, second));
-
-    PolicyAor result = service.findByAgreementProductNumber("AGR001");
-
-    assertThat(result.getAgencyNbr()).isEqualTo("FIRST");
-  }
-
-  @Test
   void findByAgreementProductNumber_notFound_throwsRequiredFieldException() {
-    when(repository.findByAgreementProductNumber("MISSING")).thenReturn(List.of());
+    when(repository.findByAgreementProductNumber("MISSING")).thenReturn(Optional.empty());
 
     assertThatThrownBy(() -> service.findByAgreementProductNumber("MISSING"))
         .isInstanceOf(RequiredFieldException.class)

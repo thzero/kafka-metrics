@@ -29,29 +29,6 @@ public class KafkaProducerConfig {
     private int processorTimeoutMs;
 
     @Bean
-    public ProducerFactory<String, String> producerFactory() {
-        Map<String, Object> props = new HashMap<>();
-        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
-        if (processorTimeoutMs > 0) {
-            props.put(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG, processorTimeoutMs);
-            props.put(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG, processorTimeoutMs / 2);
-        }
-
-        DefaultKafkaProducerFactory<String, String> factory =
-                new DefaultKafkaProducerFactory<>(props);
-        factory.setTransactionIdPrefix(Objects.requireNonNull(transactionalIdPrefix));
-        return factory;
-    }
-
-    @Bean
-    public KafkaTemplate<String, String> kafkaTemplate(@NonNull ProducerFactory<String, String> producerFactory) {
-        return new KafkaTemplate<>(producerFactory);
-    }
-
-    @Bean
     public ProducerFactory<String, JsonNode> jsonProducerFactory() {
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);

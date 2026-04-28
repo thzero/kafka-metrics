@@ -1,5 +1,6 @@
 package com.example.kafkametrics.services.processor.metrics.iif;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -57,6 +58,19 @@ class IifMetricsEventProcessorTest {
     verify(includedService).process(anyString(), anyString(), any(ObjectNode.class));
     verify(pgPointsService).process(anyString(), anyString(), any(ObjectNode.class));
     verify(publisher).publish(anyString(), any(JsonNode.class), anyString());
+  }
+
+  @Test
+  void processInternal_setsPublishedDtOnNode() {
+    doNothing().when(publisher).publish(anyString(), any(JsonNode.class), anyString());
+    long before = System.currentTimeMillis();
+    ObjectNode payload = mapper.createObjectNode();
+    payload.put("agreementProductNbr", "AGR001");
+
+    processor.process(header("msg-1"), payload);
+
+    assertThat(payload.get("publishedDt").asLong()).isGreaterThanOrEqualTo(before);
+    assertThat(payload.get("publishedDt").asLong()).isLessThanOrEqualTo(System.currentTimeMillis());
   }
 
   @Test

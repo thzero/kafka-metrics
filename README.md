@@ -37,6 +37,7 @@ A Spring Boot application that consumes messages from a Kafka input topic, persi
 - [Reference Data Services](#reference-data-services)
   - [Swapping the data source](#swapping-the-data-source)
 - [Temporal Table Database Considerations](#temporal-table-database-considerations)
+- [Message Walkthrough — Happy Path](#message-walkthrough--happy-path)
 - [Documentation](#documentation)
 
 ---
@@ -218,6 +219,93 @@ IEventProcessor                        ← interface (skeleton)
 **Multiple modules on the classpath:** annotate exactly one implementation with `@Primary`, or use `@Profile` to activate only one per environment.
 
 **Exceptions:** throw `ReasonCodeException` (or a subclass) to route to dead letter with a typed reason code. Any other unchecked exception routes with `PROCESSING_ERROR`.
+
+---
+
+## Message Walkthrough — Happy Path
+
+A trace of a single valid IIF message from Kafka arrival to committed offset.
+
+### Step 1 — Consumer thread receives the message
+
+`KafkaConsumerListener.listen()` is called by Spring Kafka with the raw `ConsumerRecord`.
+
+1. **Deserialize & validate** — JSON is parsed, the `messageId` UUID and header/payload structure are checked. Any failure dead-letters immediately.
+2. **Duplicate check** — `inFlightIds.add(messageId)` on a `ConcurrentHashSet`. If the same message is already being processed (two Kafka deliveries racing), `add()` returns `false` and it is dead-lettered as `DUPLICATE`. No DB call — nanosecond cost.
+3. **Snapshot & submit** — MDC logging context is snapshotted, the e2e latency timer starts, and work is handed off:
+   ```java
+   processingScheduler.execute(() -> processDeferred(ctx, acknowledgment, e2eSample, mdcSnapshot))
+   ```
+   The consumer thread returns immediately and is free to poll the next message.
+
+### Step 2 — Worker thread: record receipt
+
+`processDeferred()` runs on a thread from the worker pool.
+
+`controlService.recordReceived(messageId, interactionId)` inserts a row into `received_records` with a timestamp. This table has a **unique constraint on `messageId`** — so if the service restarted and Kafka redelivered this message, the insert throws `DataIntegrityViolationException`, which is caught, dead-lettered as `DUPLICATE`, and the offset is acknowledged. This is the second duplicate-detection layer, covering the crash/restart case that the in-memory set cannot catch.
+
+### Step 3 — Worker thread: IIF processing (`processor.process()`)
+
+`AbstractEventProcessor.process()` calls `IifMetricsEventProcessor.processInternal()`, which executes three services in sequence.
+
+**3a. Raw Metrics** (`IifMetricsRawProcessorService`)
+
+- Kicks off two async lookups in parallel: `PolicyMaster` and `PolicyAor` by `agreementProductNbr`, both Caffeine-cached
+- Joins the futures, validates required fields (`originalPolicyEffectiveDate`, `scenarioCd`, `agencyNbr`, `assigned`)
+- Enriches the JSON node with the looked-up values
+- Writes to `iif_metrics_raw` using the temporal table close+insert pattern:
+  - `UPDATE ... SET eff_end_dt = now WHERE eff_end_dt = HIGH_DATE` — closes the previous version
+  - `INSERT` new row with `eff_begin_dt = now`, `eff_end_dt = HIGH_DATE`
+
+**3b. Inclusion** (`IifMetricsIncludedProcessorService`)
+
+This is where business exclusion rules are evaluated. The service inspects the enriched node to determine whether this product should be excluded from downstream IIF metric calculations. Any product that fails a business rule — wrong product family, missing eligibility indicator, out-of-scope scenario code, etc. — would have `excludedInd` set to `true` here. For a valid message that passes all rules, `excludedInd = false`.
+
+The result is written to `iif_metric_inclusion` via the same close+insert temporal pattern. Like all three tables, this preserves a full audit history — every time the business rules are re-evaluated for a given product the outcome is recorded, making it straightforward to audit why a product dropped in or out of metrics over time.
+
+**3c. PG Points** (`IifMetricsPgPointsProcessorService`)
+
+This is where the business rules for PG point allocation are applied. The service resolves the agency's producer profile and the applicable point schedule, then calculates what PG points this product earns:
+
+- Looks up `Producer` by `agencyNbr` → establishes the agency's `cfmCd` (their compensation framework) and `bonusPrimaryAgencyNbr` (the agency that receives bonus credit, which may differ from the writing agency)
+- Looks up `CfmPgPoints` (load-all cache) using the four product classification keys (`agencyNbr`, `productFamilyEntCd`, `productSubFamilyEntCd`, `assetProductEntCd`) → retrieves the point value assigned to this product type under this agency's compensation framework
+- Enriches the node with the resolved `pgPointsValue`, `cfmCode`, and `bonusPrimaryAgencyNbr`
+
+Written to `iif_metrics_pg_points` via the same close+insert temporal pattern. The history table captures every recalculation, so the point value assigned to a product at any point in time — and under which compensation framework — is fully auditable.
+
+`processInternal()` returns the enriched `JsonNode`.
+
+### Step 4 — Worker thread: publish to output topic
+
+Back in `AbstractEventProcessor.process()`:
+
+- Wraps the enriched payload in an `OutboundEnvelope` (outbound header + enriched payload)
+- `KafkaProducerService.publish()` uses a **transactional KafkaTemplate** and blocks on `.get()` waiting for the broker to confirm the send
+- Published to `kafka.topic.output` with `messageId` as the record key
+
+### Step 5 — Worker thread: record publish
+
+`controlService.recordPublished(messageId, interactionId)` inserts into `published_records` with a timestamp. This is the audit trail that lets the REST API answer whether a given message has been published.
+
+### Step 6 — Worker thread: acknowledge the offset
+
+`acknowledgment.acknowledge()` commits the Kafka consumer group offset. This tells Kafka the message is fully processed and should not be redelivered. This only executes on the happy path — if any earlier step throws, this line is never reached, the offset stays uncommitted, and Kafka redelivers after the session timeout.
+
+### Finally block — always runs
+
+Regardless of success or failure:
+
+- Pipeline and e2e latency timers are stopped and recorded
+- `inFlightIds.remove(messageId)` — clears the in-memory duplicate guard so a redelivery is not incorrectly blocked
+- MDC is cleared so the next message processed on this thread starts with a clean logging context
+
+### Summary
+
+```
+Consumer thread:  receive → validate → duplicate? → snapshot MDC → submit to pool → return
+Worker thread:    recordReceived → process (raw + inclusion + pgPoints + publish) → recordPublished → ack
+Finally (always): timers → inFlightIds.remove → MDC.clear
+```
 
 ---
 
@@ -826,13 +914,38 @@ acknowledgment.acknowledge()
 
 Policy, AOR, and producer reference data is accessed through service interfaces rather than repositories directly:
 
-| Interface | Impl | Cache |
+| Interface | Impl | Cache strategy |
 |-----------|------|-------|
-| `IPolicyMasterService` | `PolicyMasterServiceImpl` | `policyMaster` |
-| `IPolicyAorService` | `PolicyAorServiceImpl` | `policyAor` |
-| `IProducerService` | `ProducerServiceImpl` | `producer` |
+| `IPolicyMasterService` | `PolicyMasterServiceImpl` | Per-key Caffeine — `@Cacheable`, TTL 15 min, max 10 000 entries |
+| `IPolicyAorService` | `PolicyAorServiceImpl` | Per-key Caffeine — `@Cacheable`, TTL 15 min, max 10 000 entries |
+| `IProducerService` | `ProducerServiceImpl` | Per-key Caffeine — `@Cacheable`, TTL 15 min, max 10 000 entries |
+| `ICfmPgPointsService` | `CfmPgPointsServiceImpl` | Load-all — full table loaded at startup, refreshed on schedule |
+| `IExclusionRuleService` | `ExclusionRuleServiceImpl` | Load-all — full table loaded at startup, refreshed on schedule (**stub** — always returns `false` until `exclusion_rules` entity/repository is built) |
 
-Each implementation is `@Cacheable` via Caffeine (TTL 15 min, max 10 000 entries). A cache miss that returns no results throws `RequiredFieldException`, which routes the message to dead letter.
+A cache miss that returns no results throws `RequiredFieldException`, which routes the message to dead letter.
+
+### Per-key vs load-all caching
+
+**Per-key Caffeine** (`PolicyMaster`, `PolicyAor`, `Producer`) is used when the table is large and each message only needs one specific row. The cache is populated on first access and entries expire individually after 15 minutes.
+
+**Load-all** (`CfmPgPoints`, exclusion rules) is used when the table is a complete ruleset — every row is relevant to the application and the whole table fits comfortably in memory. The full table is loaded in a single query at startup, then swapped atomically on a schedule. No individual per-key DB calls ever occur during message processing.
+
+The load-all pattern avoids the *thundering herd* problem that per-key TTL produces on a complete ruleset: with ~600 CFMs × 15 products = ~9 000 `CfmPgPoints` rows, per-key expiry would trigger up to 9 000 individual DB queries in a burst after each TTL cycle.
+
+### Load-all refresh interval
+
+The `CfmPgPointsServiceImpl` and `ExclusionRuleServiceImpl` refresh interval is configurable per environment:
+
+```yaml
+app:
+  cache:
+    cfm-pg-points:
+      refresh-interval-ms: 900000   # default 15 minutes
+```
+
+The initial load happens via `ApplicationReadyEvent` (after all data seeders have run). The scheduled refresh uses `fixedDelay` with the same interval as `initialDelay`, so the first scheduled reload fires one interval after startup — not immediately on top of the initial load.
+
+To force an immediate reload without restarting (e.g. after a rules table update), call `ICfmPgPointsService.refresh()` from a REST endpoint or admin tool.
 
 ### Swapping the data source
 

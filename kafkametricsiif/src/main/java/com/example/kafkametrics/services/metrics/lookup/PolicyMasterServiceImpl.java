@@ -9,8 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
 @Service
 public class PolicyMasterServiceImpl implements IPolicyMasterService {
 
@@ -25,11 +23,9 @@ public class PolicyMasterServiceImpl implements IPolicyMasterService {
     @Override
     @Cacheable("policyMaster")
     public PolicyMaster findByAgreementProductNumber(String agreementProductNumber) {
-        List<PolicyMaster> results = policyMasterRepository.findByAgreementProductNumber(agreementProductNumber);
-        if (results.isEmpty()) {
+        return policyMasterRepository.findByAgreementProductNumber(agreementProductNumber).orElseThrow(() -> {
             log.warn("No PolicyMaster found for agreementProductNumber={}", agreementProductNumber);
-            throw new RequiredFieldException("PolicyMaster not found for agreementProductNumber=" + agreementProductNumber);
-        }
-        return results.get(0);
+            return new RequiredFieldException("PolicyMaster not found for agreementProductNumber=" + agreementProductNumber);
+        });
     }
 }

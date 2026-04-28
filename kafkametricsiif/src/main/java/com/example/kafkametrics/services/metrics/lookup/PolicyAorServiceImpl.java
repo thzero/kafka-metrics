@@ -9,8 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
 @Service
 public class PolicyAorServiceImpl implements IPolicyAorService {
 
@@ -25,11 +23,9 @@ public class PolicyAorServiceImpl implements IPolicyAorService {
     @Override
     @Cacheable("policyAor")
     public PolicyAor findByAgreementProductNumber(String agreementProductNumber) {
-        List<PolicyAor> results = policyAorRepository.findByAgreementProductNumber(agreementProductNumber);
-        if (results.isEmpty()) {
+        return policyAorRepository.findByAgreementProductNumber(agreementProductNumber).orElseThrow(() -> {
             log.warn("No PolicyAor found for agreementProductNumber={}", agreementProductNumber);
-            throw new RequiredFieldException("PolicyAor not found for agreementProductNumber=" + agreementProductNumber);
-        }
-        return results.get(0);
+            return new RequiredFieldException("PolicyAor not found for agreementProductNumber=" + agreementProductNumber);
+        });
     }
 }

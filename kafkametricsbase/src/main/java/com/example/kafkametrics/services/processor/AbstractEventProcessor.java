@@ -2,8 +2,7 @@ package com.example.kafkametrics.services.processor;
 
 import com.example.kafkametrics.kafka.KafkaProducerService;
 import com.example.kafkametrics.model.EventHeader;
-import com.example.kafkametrics.model.OutboundEnvelope;
-
+import com.example.kafkametrics.model.KafkaMessage;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -19,7 +18,7 @@ import org.springframework.beans.factory.annotation.Value;
  *
  * @param <T> the output type returned by {@link #processInternal}; must be Jackson-serializable
  */
-public abstract class AbstractEventProcessor<T> implements IEventProcessor {
+public abstract class AbstractEventProcessor<T> {
 
     private static final Logger log = LoggerFactory.getLogger(AbstractEventProcessor.class);
 
@@ -37,7 +36,6 @@ public abstract class AbstractEventProcessor<T> implements IEventProcessor {
         this.objectMapper = objectMapper;
     }
 
-    @Override
     public void process(EventHeader incomingHeader, JsonNode payload) {
         String messageId = incomingHeader.messageId();
 
@@ -45,7 +43,7 @@ public abstract class AbstractEventProcessor<T> implements IEventProcessor {
 
         JsonNode outputNode = objectMapper.valueToTree(output);
         EventHeader outboundHeader = incomingHeader.withSourceSystemEntCd(sourceSystemEntCd);
-        OutboundEnvelope envelope = new OutboundEnvelope(outboundHeader, outputNode);
+        KafkaMessage envelope = new KafkaMessage(outboundHeader, outputNode);
         JsonNode json = objectMapper.valueToTree(envelope);
         log.info("Publishing processed message messageId={} to topic={}", messageId, outputTopic);
         publisher.publish(messageId, json, outputTopic);

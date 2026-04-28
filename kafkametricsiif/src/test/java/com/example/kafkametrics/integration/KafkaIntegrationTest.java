@@ -10,7 +10,6 @@ import com.example.kafkametrics.deadletter.DeadLetterRecord;
 import com.example.kafkametrics.deadletter.IDeadLetterRepository;
 import com.example.kafkametrics.model.EventHeader;
 import com.example.kafkametrics.model.KafkaMessage;
-import com.example.kafkametrics.model.OutboundEnvelope;
 import com.example.kafkametrics.repository.lookup.CfmPgPoints;
 import com.example.kafkametrics.repository.lookup.ICfmPgPointsRepository;
 import com.example.kafkametrics.repository.lookup.IPolicyAorRepository;
@@ -19,6 +18,7 @@ import com.example.kafkametrics.repository.lookup.IProducerRepository;
 import com.example.kafkametrics.repository.lookup.PolicyAor;
 import com.example.kafkametrics.repository.lookup.PolicyMaster;
 import com.example.kafkametrics.repository.lookup.Producer;
+import com.example.kafkametrics.services.metrics.lookup.ICfmPgPointsService;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -72,6 +72,7 @@ class KafkaIntegrationTest {
     @Autowired private ICfmPgPointsRepository cfmPgPointsRepository;
     @Autowired private ObjectMapper objectMapper;
     @Autowired private IDeadLetterRepository deadLetterRepository;
+    @Autowired private ICfmPgPointsService cfmPgPointsService;
 
     @Value("${kafka.topic.input}")  private String inputTopic;
     @Value("${kafka.topic.output}") private String outputTopic;
@@ -104,6 +105,9 @@ class KafkaIntegrationTest {
         cfm.setAssetProductEntCd(ASSET_PRODUCT_ENT_CD);
         cfm.setPgPointsValue(25);
         cfmPgPointsRepository.save(cfm);
+
+        // Refresh cache so it reflects the data inserted above
+        cfmPgPointsService.refresh();
     }
 
     @Test
@@ -153,7 +157,7 @@ class KafkaIntegrationTest {
             fail("No output received after 10s. Dead letters: [" + dlqSummary + "]");
         }
 
-        OutboundEnvelope outputEnvelope = objectMapper.readValue(received.value(), OutboundEnvelope.class);
+        KafkaMessage outputEnvelope = objectMapper.readValue(received.value(), KafkaMessage.class);
         assertThat(outputEnvelope.header().messageId()).isEqualTo(messageId);
 
         // Assert: RECEIVED and PUBLISHED control records exist
