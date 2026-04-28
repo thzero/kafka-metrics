@@ -16,7 +16,8 @@ spring:
     username: sa
     password:
     hikari:
-      maximum-pool-size: 200  # match worker-threads so no thread blocks waiting for a connection
+      maximum-pool-size: 200  # H2 dev default — for production Oracle/Postgres, size independently of worker-threads
+                              # (e.g. 10-20 per instance); connections are held only during @Transactional SCD2 writes
   jpa:
     hibernate:
       ddl-auto: create-drop
