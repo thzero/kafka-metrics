@@ -1,6 +1,6 @@
 # Kafka Metrics Processor
 
-A Spring Boot application that consumes messages from a Kafka input topic, persists IIF metrics to SCD2 tables, and publishes the enriched result to an output topic — with exactly-once semantics, atomic duplicate detection, Caffeine reference-data caching, and a REST API for operational visibility.
+A Spring Boot application that consumes messages from a Kafka input topic, persists IIF metrics to temporal (audit history) tables, and publishes the enriched result to an output topic — with exactly-once semantics, atomic duplicate detection, Caffeine reference-data caching, and a REST API for operational visibility.
 
 ---
 
@@ -30,12 +30,13 @@ A Spring Boot application that consumes messages from a Kafka input topic, persi
   - [Full test loop](#full-test-loop)
 - [Bruno API Collection](#bruno-api-collection)
 - [IIF Metrics Persistence](#iif-metrics-persistence)
-  - [SCD Type 2 — Effective Date Tracking](#scd-type-2--effective-date-tracking)
+  - [Temporal Tables (aka Audit History Tables)](#temporal-tables-aka-audit-history-tables)
   - [Write Logic (saveFromNode)](#write-logic-savefromnode)
   - [Transaction Boundary](#transaction-boundary)
   - [Why the control table writes are separate transactions](#why-the-control-table-writes-are-separate-transactions)
 - [Reference Data Services](#reference-data-services)
   - [Swapping the data source](#swapping-the-data-source)
+- [Temporal Table Database Considerations](#temporal-table-database-considerations)
 - [Documentation](#documentation)
 
 ---
@@ -352,6 +353,10 @@ spring:
     username: kafkametrics
     password: secret
     driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 20   # size independently of worker-threads — connections are held only
+                              # during @Transactional SCD2 writes (milliseconds); 10-20 per instance
+                              # is typical; 10 instances × 20 = 200 total Oracle connections
   jpa:
     hibernate:
       ddl-auto: validate   # never use create-drop in production
@@ -726,9 +731,18 @@ A [Bruno](https://www.usebruno.com/) collection is included in the `bruno/` fold
 
 ## IIF Metrics Persistence
 
-### SCD Type 2 — Effective Date Tracking
+### Temporal Tables (aka Audit History Tables)
 
-Both `iif_metrics_raw` and `iif_metric_inclusion` implement **Slowly Changing Dimension Type 2** history. Every time a record is written for a given `agreementProductNbr` + `assetId` key, the previous active row is closed and a new row is inserted.
+The IIF metrics tables use a **temporal table** pattern (also called audit history tables): instead of overwriting a row when data changes, you keep the old row and insert a new one, so you never lose history.
+
+Concretely: instead of updating a row in place, you:
+
+1. **Close** the previous row by setting `eff_end_dt = now`
+2. **Insert** a new row with `eff_begin_dt = now` and `eff_end_dt = HIGH_DATE` (a far-future sentinel meaning "still active")
+
+At any point in time you can query what the data *was*, not just what it *is now*.
+
+> This pattern is sometimes called **SCD Type 2** (Slowly Changing Dimension Type 2) — a data warehousing term that stuck even when applied outside DW contexts. The SQL:2011 standard codified it as **system-versioned temporal tables** (`PERIOD FOR SYSTEM_TIME`), supported natively by Oracle 12c (via Flashback Data Archive), SQL Server, MariaDB, and DB2. This codebase implements it manually since H2 and most JPA stacks don't support the native syntax out of the box.
 
 | Column | Type | Meaning |
 |--------|------|---------|
@@ -838,6 +852,147 @@ public class PolicyMasterApiServiceImpl implements IPolicyMasterService {
 ```
 
 No changes to the processor services are required.
+
+---
+
+## Temporal Table Database Considerations
+
+This codebase implements the temporal table pattern manually (close + insert). Several databases offer native support — here's how they compare across three dimensions that matter for a derived-data pipeline: **history queries**, **wipe-and-reload**, and **Exadata behaviour**.
+
+### Native temporal table options
+
+**Oracle 12c — Flashback Data Archive (FDA / system-time)**
+
+Oracle tracks all row changes automatically in a hidden archive segment. Application code writes plain `UPDATE`/`DELETE` and Oracle intercepts the change, moving the pre-image to the archive before applying the mutation. No application-level close+insert required.
+
+*History queries* use Oracle's `AS OF` clause:
+```sql
+-- What did this policy look like on a specific date?
+SELECT *
+FROM   iif_metrics_raw AS OF TIMESTAMP TO_TIMESTAMP('2026-01-01 12:00:00', 'YYYY-MM-DD HH24:MI:SS')
+WHERE  agreement_product_nbr = 'D25IRBZZNZNU061';
+
+-- Full audit trail for a policy (requires querying the archive directly)
+SELECT versions_starttime, versions_endtime, versions_operation, t.*
+FROM   iif_metrics_raw VERSIONS BETWEEN TIMESTAMP MINVALUE AND MAXVALUE t
+WHERE  agreement_product_nbr = 'D25IRBZZNZNU061'
+ORDER BY versions_starttime;
+```
+The `VERSIONS BETWEEN` syntax is FDA-specific and very convenient for auditing, but it hides all the rows in an Oracle-internal structure — you cannot query the history with plain `SELECT * FROM iif_metrics_raw_history`. There is no `_history` table to look at directly.
+
+*Wipe-and-reload* is the hard problem with FDA. The archive is **append-only by design** — that's the whole point for compliance use cases. To purge it you either:
+- Wait for the FDA retention period to expire (days/weeks, DBA-configured), or
+- Disable FDA on the table, truncate the archive manually, re-enable FDA — a multi-step DBA operation that momentarily loses auditability.
+
+For a pipeline where the correct response to bad upstream data is "delete everything and replay from Kafka", FDA is a significant operational burden. A `TRUNCATE iif_metrics_raw` that looks instant to the application actually leaves a large archive behind.
+
+**Oracle 12c — `PERIOD FOR` (application-time)**
+
+SQL:2011 application-time syntax adds Oracle enforcement and cleaner query syntax over your own `eff_begin_dt`/`eff_end_dt` columns:
+```sql
+-- Schema addition only (no behaviour change)
+ALTER TABLE iif_metrics_raw ADD PERIOD FOR app_period (eff_begin_dt, eff_end_dt);
+
+-- Cleaner query syntax with Oracle enforcing the period semantics
+SELECT *
+FROM   iif_metrics_raw FOR PERIOD OF app_period AS OF DATE '2026-01-01'
+WHERE  agreement_product_nbr = 'D25IRBZZNZNU061';
+```
+This is purely syntactic sugar over the manual approach — Oracle validates that ranges don't overlap and you get the `FOR PERIOD OF` query syntax, but the rows live in the same table, the same indexes apply, and wipe-and-reload is identical: `DELETE WHERE agreement_product_nbr = ?` or `TRUNCATE` works the same way. No DBA involvement required.
+
+JPA/Hibernate has no understanding of `FOR PERIOD OF`, so history queries must be native SQL. Not worth the Oracle lock-in for minor ergonomic improvement.
+
+**SQL Server 2016+ — system-versioned temporal tables**
+
+Conceptually identical to Oracle FDA but with a more transparent implementation. SQL Server creates an explicit `_history` table alongside the current table:
+```sql
+CREATE TABLE iif_metrics_raw (
+    id              BIGINT IDENTITY PRIMARY KEY,
+    agreement_product_nbr VARCHAR(50) NOT NULL,
+    eff_begin_dt    DATETIME2 GENERATED ALWAYS AS ROW START,
+    eff_end_dt      DATETIME2 GENERATED ALWAYS AS ROW END,
+    PERIOD FOR SYSTEM_TIME (eff_begin_dt, eff_end_dt)
+) WITH (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.iif_metrics_raw_history));
+```
+History queries use `FOR SYSTEM_TIME`:
+```sql
+-- Point-in-time
+SELECT * FROM iif_metrics_raw FOR SYSTEM_TIME AS OF '2026-01-01T12:00:00'
+WHERE  agreement_product_nbr = 'D25IRBZZNZNU061';
+
+-- Full history range
+SELECT * FROM iif_metrics_raw FOR SYSTEM_TIME BETWEEN '2025-01-01' AND '2026-01-01'
+WHERE  agreement_product_nbr = 'D25IRBZZNZNU061'
+ORDER BY eff_begin_dt;
+
+-- Or query the history table directly — it's just a normal table
+SELECT * FROM dbo.iif_metrics_raw_history
+WHERE  agreement_product_nbr = 'D25IRBZZNZNU061'
+ORDER BY eff_begin_dt;
+```
+Because the history table is a real, visible table you can query it with plain SQL, write your own indexes on it, and monitor its size. This is more transparent than FDA's hidden archive.
+
+*Wipe-and-reload* has the same constraint as FDA. You cannot `TRUNCATE` a system-versioned table — SQL Server raises an error. The supported path is:
+```sql
+-- Must disable versioning first
+ALTER TABLE iif_metrics_raw SET (SYSTEM_VERSIONING = OFF);
+TRUNCATE TABLE iif_metrics_raw;
+TRUNCATE TABLE iif_metrics_raw_history;
+ALTER TABLE iif_metrics_raw SET (SYSTEM_VERSIONING = ON (HISTORY_TABLE = dbo.iif_metrics_raw_history));
+```
+That is four DDL statements and a window where history is not being captured. In a pipeline that wipes and replays routinely, this becomes a scripting and coordination problem.
+
+SQL Server 2022 added `FOR APPLICATION_TIME` (equivalent to Oracle's `PERIOD FOR`) — same tradeoffs apply.
+
+### Wipe-and-reload comparison
+
+This is the dominant differentiator for a derived-data pipeline. The data in these tables is not a source of truth — it was computed from Kafka messages that are still retained. Wipe-and-reload is a routine corrective operation, not an emergency.
+
+| Operation | Manual close+insert | Oracle FDA | Oracle `PERIOD FOR` | SQL Server system-versioned |
+|---|---|---|---|---|
+| Delete one agreement's history | `DELETE WHERE agreement_product_nbr = ?` | Same SQL, but archive is not cleared | Same as manual | Same SQL, history table also deletable |
+| Truncate all data for a fresh replay | `TRUNCATE TABLE` | Disable FDA → truncate archive → re-enable (DBA) | `TRUNCATE TABLE` | Disable versioning → truncate both tables → re-enable |
+| Partial period purge (e.g., bad upstream batch) | `DELETE WHERE eff_begin_dt BETWEEN ...` | SQL works on current table; archive rows may remain | `DELETE WHERE eff_begin_dt BETWEEN ...` | SQL works; history table also deletable directly |
+| Downstream consumer wants consistent snapshot | Control via `eff_end_dt = HIGH_DATE` | `AS OF TIMESTAMP` | `FOR PERIOD OF ... AS OF` | `FOR SYSTEM_TIME AS OF` |
+
+The manual approach and Oracle `PERIOD FOR` are the only options where a single `TRUNCATE` cleanly wipes the table with no DDL gymnastics or DBA involvement.
+
+### History query comparison
+
+All approaches support point-in-time and range queries; the syntax and access path differ:
+
+| Query type | Manual close+insert | Oracle FDA / `PERIOD FOR` | SQL Server system-versioned |
+|---|---|---|---|
+| Current state | `WHERE eff_end_dt = HIGH_DATE` | No predicate needed (current table only) | No predicate needed (current table only) |
+| Point-in-time | `WHERE eff_begin_dt <= :ts AND eff_end_dt > :ts` | `AS OF TIMESTAMP :ts` | `FOR SYSTEM_TIME AS OF :ts` |
+| Full audit trail | `WHERE agreement_product_nbr = ? ORDER BY eff_begin_dt` | `VERSIONS BETWEEN MINVALUE AND MAXVALUE` | Query `_history` table directly |
+| JPA-compatible | Yes — standard JPQL or native SQL | Point-in-time: native SQL only | Point-in-time: native SQL only |
+| Index strategy | Index on `(eff_end_dt, agreement_product_nbr)` | Separate index on archive needed for range queries | Separate index on `_history` table recommended |
+
+With manual close+insert the full history is always a straightforward `SELECT` with a `WHERE` clause — no special syntax, no ORM extension, works identically on every database.
+
+### Performance implications
+
+| Scenario | Manual close+insert | System-versioned (FDA / SQL Server) |
+|---|---|---|
+| Write throughput | Baseline | Equivalent (engine does same work internally) |
+| Current-data queries (large table) | Index on `eff_end_dt` required; all versions in one table | Faster — history rows are physically separate |
+| History queries | Standard SQL with date range predicates | Dedicated history table / archive; may still need explicit index |
+| Cleanup / wipe-and-reload | `TRUNCATE` — instant, no DBA needed | DDL + coordinated steps required |
+
+The main performance argument for system-versioned is that current-data queries are faster when the table accumulates many versions, because history rows are physically absent from the current table. With manual close+insert, even an indexed `WHERE eff_end_dt = HIGH_DATE` must navigate a larger index as history accumulates.
+
+### Exadata and why the performance argument weakens
+
+On Exadata the current-data query cost of a mixed current+history table becomes much less relevant:
+
+**Smart Scan** pushes predicate evaluation into the storage cells themselves. When a full segment scan runs (e.g., a large range query without a leading-index hit), Oracle ships only the rows that satisfy the predicate. An `eff_end_dt = HIGH_DATE` filter is evaluated at the storage layer — history rows never travel the InfiniBand fabric to the DB server. This eliminates the primary cost difference between a mixed table and a current-only table for large analytical queries.
+
+**Storage indexes** are automatically maintained per 1 MB storage region, tracking the min and max value of each column in that region. For `eff_end_dt`, regions that contain only closed history rows (all `eff_end_dt < HIGH_DATE`) are skipped entirely before Smart Scan even looks at them. This is effectively a free, self-maintaining zone map that makes the `eff_end_dt = HIGH_DATE` filter very cheap regardless of table size.
+
+**Hybrid Columnar Compression (HCC)** compresses cold history rows 10–20x. History rows share the same value in most columns (only `eff_end_dt` changes between versions) and compress extremely well under HCC's columnar layout. The physical footprint of a large history accumulation on Exadata is a fraction of what it would be on conventional storage, reducing the I/O cost of even the cases where Smart Scan must touch historical data.
+
+The combined effect is that on Exadata the performance gap between manual close+insert and system-versioned temporal tables is small enough that the operational simplicity of the manual approach wins. Wipe-and-reload stays a single `TRUNCATE`. History queries stay plain SQL. JPA works without native query workarounds. No DBA coordination required for routine pipeline maintenance.
 
 ---
 
