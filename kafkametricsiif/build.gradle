@@ -1,3 +1,12 @@
+buildscript {
+    repositories { mavenCentral() }
+    dependencies {
+        classpath 'org.flywaydb:flyway-core:10.20.1'
+        classpath 'org.flywaydb:flyway-database-postgresql:10.20.1'
+        classpath 'org.postgresql:postgresql:42.7.4'
+    }
+}
+
 plugins {
     id 'org.springframework.boot'
 }
@@ -5,13 +14,80 @@ plugins {
 // kafkametricsiif is the runnable Spring Boot application.
 // All base Spring Boot starters are inherited transitively via kafkametricsbase.
 
+def flywayDb = [
+    url     : findProperty('flywayUrl')      ?: 'jdbc:postgresql://localhost:5432/metrics?currentSchema=iif',
+    user    : findProperty('flywayUser')     ?: 'metrics_admin',
+    password: findProperty('flywayPassword') ?: ''
+]
+
+def migrationPath = "filesystem:${projectDir}/src/main/resources/db/migration"
+
+tasks.register('flywayMigrate') {
+    group = 'database'
+    description = 'Applies pending Flyway migrations to Postgres.'
+    doLast {
+        def flyway = org.flywaydb.core.Flyway.configure()
+            .dataSource(flywayDb.url, flywayDb.user, flywayDb.password)
+            .schemas('iif')
+            .createSchemas(false)
+            .locations(migrationPath)
+            .load()
+        def result = flyway.migrate()
+        logger.lifecycle('Applied {} migration(s).', result.migrationsExecuted)
+    }
+}
+
+tasks.register('flywayInfo') {
+    group = 'database'
+    description = 'Prints current Flyway migration status.'
+    doLast {
+        def flyway = org.flywaydb.core.Flyway.configure()
+            .dataSource(flywayDb.url, flywayDb.user, flywayDb.password)
+            .schemas('iif')
+            .createSchemas(false)
+            .locations(migrationPath)
+            .load()
+        flyway.info().all().each { info ->
+            logger.lifecycle('{}\t{}\t{}\t{}', info.version, info.description, info.state, info.installedOn ?: '-')
+        }
+    }
+}
+
+tasks.register('flywayValidate') {
+    group = 'database'
+    description = 'Validates applied Flyway migrations against local scripts.'
+    doLast {
+        def flyway = org.flywaydb.core.Flyway.configure()
+            .dataSource(flywayDb.url, flywayDb.user, flywayDb.password)
+            .schemas('iif')
+            .createSchemas(false)
+            .locations(migrationPath)
+            .load()
+        flyway.validate()
+        logger.lifecycle('Flyway validation passed.')
+    }
+}
+
 dependencies {
     implementation project(':kafkametricsbase')
 
-    runtimeOnly 'com.h2database:h2'
+    runtimeOnly 'org.postgresql:postgresql'
+    runtimeOnly 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+    testRuntimeOnly 'com.h2database:h2'
     runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
     runtimeOnly 'io.micrometer:micrometer-registry-datadog'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
 }
+
+tasks.register('seedDatabase', JavaExec) {
+    group = 'database'
+    description = 'Seeds reference data into Postgres without starting the full app.'
+    dependsOn compileJava
+    classpath = configurations.runtimeClasspath + sourceSets.main.output
+    mainClass = 'com.example.kafkametrics.KafkaMetricsApplication'
+    args '--spring.profiles.active=seed'
+}
+

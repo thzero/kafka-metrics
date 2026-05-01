@@ -23,10 +23,13 @@ A Spring Boot application that consumes messages from a Kafka input topic, persi
 - [Running Locally](#running-locally)
   - [1. Start the local stack](#1-start-the-local-stack)
   - [2. Build and run all tests](#2-build-and-run-all-tests)
-  - [3. Run the application](#3-run-the-application)
-  - [4. Generate test messages](#4-generate-test-messages)
-  - [5. Send messages to Kafka](#5-send-messages-to-kafka)
-  - [6. Monitor pipeline timings](#6-monitor-pipeline-timings)
+  - [3. Set up the database](#3-set-up-the-database)
+    - [3a. One-time PostgreSQL setup](#3a-one-time-postgresql-setup-run-as-the-postgres-superuser)
+    - [3b. Apply schema and seed data](#3b-apply-schema-and-seed-data)
+  - [4. Run the application](#4-run-the-application)
+  - [5. Generate test messages](#5-generate-test-messages)
+  - [6. Send messages to Kafka](#6-send-messages-to-kafka)
+  - [7. Monitor pipeline timings](#7-monitor-pipeline-timings)
   - [Full test loop](#full-test-loop)
 - [Bruno API Collection](#bruno-api-collection)
 - [IIF Metrics Persistence](#iif-metrics-persistence)
@@ -679,7 +682,73 @@ docker exec kafka /opt/kafka/bin/kafka-consumer-groups.sh `
 .\gradlew test
 ```
 
-### 3. Run the application
+### 3. Set up the database
+
+The application uses **PostgreSQL** (`localhost:5432`, database `metrics`). Schema is managed by Flyway and reference data by a seeder task — both run independently of the application.
+
+#### 3a. One-time PostgreSQL setup (run as the `postgres` superuser)
+
+Before running Flyway, the database, schema, and roles must exist. Connect to PostgreSQL as `postgres` (e.g. via the **SQL Shell (psql)** app in the PostgreSQL Start Menu folder) and run:
+
+```sql
+-- Create the database
+CREATE DATABASE metrics;
+
+\c metrics
+
+-- Create the dedicated application schema owned by the admin role
+CREATE SCHEMA IF NOT EXISTS iif;
+
+-- Create roles
+CREATE ROLE metrics_admin WITH LOGIN PASSWORD 'metrics_admin';
+CREATE ROLE metrics WITH LOGIN PASSWORD 'metrics';
+
+-- Grant the admin role full rights on the database and schema
+GRANT ALL PRIVILEGES ON DATABASE metrics TO metrics_admin;
+GRANT CREATE ON DATABASE metrics TO metrics_admin;
+ALTER SCHEMA iif OWNER TO metrics_admin;
+
+-- Grant the app role usage on the schema (read/write, no DDL)
+GRANT USAGE ON SCHEMA iif TO metrics;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA iif TO metrics;
+ALTER DEFAULT PRIVILEGES IN SCHEMA iif
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO metrics;
+```
+
+> **Note:** PostgreSQL 15+ no longer grants `CREATE` on the `public` schema to all users by default. The `iif` schema sidesteps this — `metrics_admin` owns it and has full DDL rights; `metrics` has DML-only access.
+
+#### 3b. Apply schema and seed data
+
+**Apply schema migrations (run once, or after any new migration file):**
+```powershell
+.\gradlew :kafkametricsiif:flywayMigrate
+```
+
+**Check migration status:**
+```powershell
+.\gradlew :kafkametricsiif:flywayInfo
+```
+
+**Validate applied migrations match local SQL files:**
+```powershell
+.\gradlew :kafkametricsiif:flywayValidate
+```
+
+**Seed reference data (PolicyMaster, PolicyAor, Producer, CfmPgPoints):**
+```powershell
+.\gradlew :kafkametricsiif:seedDatabase
+```
+
+> The seeder is idempotent — if data already exists it logs a skip message and exits. To re-seed from scratch, truncate the lookup tables first: `TRUNCATE policy_master CASCADE;` then re-run `seedDatabase`.
+
+**Typical first-time setup sequence:**
+```powershell
+.\gradlew :kafkametricsiif:flywayMigrate
+.\gradlew :kafkametricsiif:seedDatabase
+```
+
+### 4. Run the application
+
 
 Two independent profile axes control behaviour at startup:
 
@@ -713,7 +782,7 @@ DD_API_KEY=your-api-key ./gradlew :kafkametricsiif:bootRun --args='--spring.prof
 
 The `kafka.processor.*` counters and timers appear in Datadog automatically under those metric names. The `/actuator/prometheus` endpoint is only available under the `prometheus` profile.
 
-### 4. Generate test messages
+### 5. Generate test messages
 
 ```powershell
 # Default: 1000 messages
@@ -734,7 +803,7 @@ gen-messages.cmd          :: 1000 messages
 gen-messages.cmd 500      :: 500 messages
 ```
 
-### 5. Send messages to Kafka
+### 6. Send messages to Kafka
 
 ```bat
 send-messages.cmd                                          :: sends most recent JSONL → input-topic
@@ -744,7 +813,7 @@ send-messages.cmd build\generated-messages\messages-100.jsonl my-input-topic
 
 Requires the `kafka` container to be running. The script copies the JSONL into the container and pipes it through `kafka-console-producer`.
 
-### 6. Monitor pipeline timings
+### 7. Monitor pipeline timings
 
 Open Grafana at **http://localhost:3000** → Dashboards → **Kafka Processor**.
 

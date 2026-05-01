@@ -50,6 +50,10 @@ public class IifDataSeeder implements CommandLineRunner {
 
     @Override
     public void run(String... args) {
+        if (policyMasterRepository.count() > 0) {
+            log.info("[SEED] Data already present — skipping seed.");
+            return;
+        }
         log.info("[SEED] Seeding {} PolicyMaster and {} PolicyAor records...", POLICY_COUNT, AOR_COUNT);
 
         List<PolicyMaster> policies = new ArrayList<>(POLICY_COUNT);

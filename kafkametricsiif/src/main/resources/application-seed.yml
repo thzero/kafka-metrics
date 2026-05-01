@@ -1,0 +1,16 @@
+spring:
+  main:
+    web-application-type: none   # no Tomcat — exits after CommandLineRunners complete
+  kafka:
+    listener:
+      auto-startup: false        # containers are created but never start polling
+
+management:
+  datadog:
+    metrics:
+      export:
+        enabled: false
+
+app:
+  seed-data:
+    enabled: true

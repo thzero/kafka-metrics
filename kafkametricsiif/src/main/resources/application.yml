@@ -11,20 +11,16 @@ spring:
     #   SPRING_PROFILES_ACTIVE=datadog java -jar app.jar
     default: prometheus,local
   datasource:
-    url: jdbc:h2:mem:controldb;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
-    driver-class-name: org.h2.Driver
-    username: sa
-    password:
+    url: jdbc:postgresql://localhost:5432/metrics?currentSchema=iif
+    driver-class-name: org.postgresql.Driver
+    username: metrics_admin
+    password: metrics_admin
     hikari:
-      maximum-pool-size: 200  # H2 dev default — for production Oracle/Postgres, size independently of worker-threads
-                              # (e.g. 10-20 per instance); connections are held only during @Transactional SCD2 writes
+      maximum-pool-size: 20  # size independently of worker-threads; connections held only during @Transactional SCD2 writes
   jpa:
     hibernate:
-      ddl-auto: create-drop
+      ddl-auto: validate
     show-sql: false
-  h2:
-    console:
-      enabled: false
   cache:
     type: caffeine
     cache-names: policyMaster,policyAor,producer
